@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/groups"
 )
 
 // TestGroupsAssignRemoveRace drives the assign/remove handler path
@@ -75,6 +76,85 @@ func TestGroupsAssignRemoveRace(t *testing.T) {
 	if _, ok := seen["agent:1/policy1"]; !ok {
 		t.Fatalf("original binding agent:1/policy1 missing after race; bindings=%+v", g.Bindings)
 	}
+}
+
+// TestGroupsListSnapshotAtomic pins M7 (audit D-1): groups.list must
+// return the policy and binding tables from ONE lock-held instant. A
+// concurrent assign during list must never yield a "mixed" response — a
+// bindings list naming a policy the same response's policy table lacks
+// (the dangling-binding shape C6 rejects at assign time).
+//
+// The assign adds a UNIQUE policy per iteration before binding it, so the
+// mixed-instant window (the old per-table lock shape) is exactly the gap
+// between the two table copies: a response whose bindings carry policy_i
+// while its policies predate the assign. Under snapshotGroupTables the
+// two copies are one lock-held instant, so every binding's policy is
+// present in the same response's policy table (plus the seed policy).
+func TestGroupsListSnapshotAtomic(t *testing.T) {
+	cfg := &config.Config{
+		Security: config.SecurityConfig{
+			Groups: config.SecurityGroupsConfig{
+				AdminAgents: []string{"agent-update"},
+				Policies: []config.GroupsPolicyConfig{
+					{Name: "policy-seed", ToolsAllowed: []string{"tool1"}},
+				},
+				Bindings: []config.GroupsBindingConfig{
+					{Subject: "agent:1", Policy: "policy-seed"},
+				},
+			},
+		},
+	}
+	h := NewGroupsHandler(cfg, "", nil, nil, nil)
+	ctx := peerCtx(true) // daemon-descendant peer so the C5 gate lets the mutation through
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// Define-then-bind a unique policy per round: the
+			// assign lands a NEW policy + binding together, so any
+			// tear between the two table copies shows up as a
+			// binding whose policy is absent from the response.
+			pn := fmt.Sprintf("policy-race-%d", i)
+			_, _ = h.handleAssign(ctx, json.RawMessage(
+				`{"subject": "agent:assignee-`+pn+`", "policy": {"name": "`+pn+`", "tools_allowed": ["tool1"]}, "agent_id": "agent-update"}`))
+		}
+	}()
+
+	const iterations = 300
+	for i := 0; i < iterations; i++ {
+		res, err := h.handleList(ctx, nil)
+		if err != nil {
+			t.Fatalf("handleList unexpected error: %v", err)
+		}
+		m, ok := res.(map[string]any)
+		if !ok {
+			t.Fatalf("handleList result is not a map: %T", res)
+		}
+		policies, _ := m["policies"].([]groups.Policy)
+		bindings, _ := m["bindings"].([]groups.Binding)
+		known := make(map[string]struct{}, len(policies))
+		for _, p := range policies {
+			known[p.Name] = struct{}{}
+		}
+		for _, b := range bindings {
+			if _, ok := known[b.Policy]; !ok {
+				stop <- struct{}{}
+				wg.Wait()
+				t.Fatalf("M7 mixed-instant response at iteration %d: binding %s -> policy %q absent from the same response's policy table (%d policies, %d bindings)",
+					i, b.Subject, b.Policy, len(policies), len(bindings))
+			}
+		}
+	}
+	close(stop)
+	wg.Wait()
 }
 
 // TestGroupsAssignRemovePayload checks that the assign/remove success

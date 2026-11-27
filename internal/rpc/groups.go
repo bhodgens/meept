@@ -94,12 +94,20 @@ type GroupsHandler struct {
 	audit    *auditlog.Store
 	// mu guards the shared live config's group table (policies +
 	// bindings) across concurrent assign/remove RPC calls: one goroutine
-	// per connection, and saveConfigAtomic marshals the same live struct —
-	// without it a concurrent mutation tears the slice mid-save.
-	// The lock is held for the whole copy-then-swap + persist window so a
-	// concurrent reader (list/explain/other mutation) never observes a
-	// half-built bindings list.
+	// per connection, and the persist path marshals the same live
+	// struct — without it a concurrent mutation tears the slice
+	// mid-marshal. The lock covers the table copy-then-swap plus the
+	// config JSON marshal (M8/D-2: marshal must observe the mutated
+	// instant); the FILE WRITE happens outside it under cfgSaveMu, so
+	// readers (list/explain/other mutation) block for microseconds of
+	// CPU, never for disk I/O.
 	mu sync.Mutex
+	// cfgSaveMu serializes config FILE WRITES across concurrent
+	// mutations (M8): each writer marshals its post-mutation instant
+	// under mu, releases mu, then writes under this lock — so two
+	// interleaved mutations can never land their writes out of order
+	// (the last writer under mu also writes last to the file).
+	cfgSaveMu sync.Mutex
 	// auditRefusal logs denied mutation attempts at debug when non-nil.
 	auditRefusal func(action, reason string)
 	// knownTools is the live registry tool-name set for C6 validation
@@ -215,21 +223,25 @@ func (h *GroupsHandler) RegisterGroupsMethods(server *Server) {
 	server.RegisterHandler("groups.check", h.handleCheck)
 }
 
-// groupsPolicies returns the handler's policy table as model rows.
-// Read under mu for the whole iteration (issue #183): applyPolicyBinding
-// upserts g.Policies IN PLACE, so an early unlock here would let a
-// concurrent groups.assign mutate an element while this loop reads it.
-// No I/O happens under this lock (AGENTS.md mutex-IO rule).
-func (h *GroupsHandler) groupsPolicies() []groups.Policy {
+// snapshotGroupTables copies the policy and binding tables under ONE lock
+// acquisition (bughunt 2026-11-27 M7 / audit D-1): taking h.mu separately
+// per table let a concurrent groups.assign land between the two copies and
+// yield a combined response whose bindings post-date its policies — a
+// binding naming a policy the same response does not contain (the exact
+// dangling-binding shape C6 rejects at assign time). Both copies here read
+// the same lock-held instant; no I/O happens under the lock (AGENTS.md
+// mutex-IO rule — the copies are pure CPU).
+func (h *GroupsHandler) snapshotGroupTables() ([]groups.Policy, []groups.Binding) {
 	if h.cfg == nil {
-		return nil
+		return nil, nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	g := h.cfg.Security.Groups
-	out := make([]groups.Policy, 0, len(g.Policies))
+
+	policies := make([]groups.Policy, 0, len(g.Policies))
 	for _, p := range g.Policies {
-		out = append(out, groups.Policy{
+		policies = append(policies, groups.Policy{
 			Name:           p.Name,
 			ToolsAllowed:   p.ToolsAllowed,
 			ToolsDenied:    p.ToolsDenied,
@@ -239,41 +251,52 @@ func (h *GroupsHandler) groupsPolicies() []groups.Policy {
 			AllowedModels:  p.AllowedModels,
 		})
 	}
-	return out
+
+	bindings := make([]groups.Binding, 0, len(g.Bindings))
+	for _, b := range g.Bindings {
+		bindings = append(bindings, groups.Binding{Subject: b.Subject, Policy: b.Policy, Scope: b.Scope})
+	}
+	return policies, bindings
+}
+
+// groupsPolicies returns the handler's policy table as model rows.
+// Read under mu for the whole iteration (issue #183): applyPolicyBinding
+// upserts g.Policies IN PLACE, so an early unlock here would let a
+// concurrent groups.assign mutate an element while this loop reads it.
+// No I/O happens under this lock (AGENTS.md mutex-IO rule).
+// groups.list itself uses snapshotGroupTables (M7: one instant for both
+// tables); this helper remains for single-table readers.
+func (h *GroupsHandler) groupsPolicies() []groups.Policy {
+	if h.cfg == nil {
+		return nil
+	}
+	policies, _ := h.snapshotGroupTables()
+	return policies
 }
 
 // groupsBindings returns the handler's binding table as model rows.
 // Read under mu for the whole iteration (issue #183), same reason as
 // groupsPolicies: the header copy must not race applyPolicyBinding's
-// swap of g.Bindings.
+// swap of g.Bindings. Single-table readers only — groups.list must use
+// snapshotGroupTables so both tables come from one instant (M7).
 func (h *GroupsHandler) groupsBindings() []groups.Binding {
 	if h.cfg == nil {
 		return nil
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	g := h.cfg.Security.Groups
-	out := make([]groups.Binding, 0, len(g.Bindings))
-	for _, b := range g.Bindings {
-		out = append(out, groups.Binding{Subject: b.Subject, Policy: b.Policy, Scope: b.Scope})
-	}
-	return out
+	_, bindings := h.snapshotGroupTables()
+	return bindings
 }
 
-// handleList returns the policy + binding tables (read method: no gate
-// beyond transport auth).
+// handleList returns the policy + binding tables from ONE lock-held
+// instant (M7/D-1: snapshotGroupTables takes h.mu once for both copies —
+// the previous shape locked separately per table, so an assign landing
+// between the two copies produced a bindings list naming a policy the
+// same response's policy table lacked).
 func (h *GroupsHandler) handleList(ctx context.Context, params json.RawMessage) (any, error) {
 	if h.cfg == nil {
 		return nil, fmt.Errorf("groups.list: config not available")
 	}
-	policies := h.groupsPolicies()
-	bindings := h.groupsBindings()
-	if policies == nil {
-		policies = []groups.Policy{}
-	}
-	if bindings == nil {
-		bindings = []groups.Binding{}
-	}
+	policies, bindings := h.snapshotGroupTables()
 	return map[string]any{
 		"policies":        policies,
 		"bindings":        bindings,
@@ -662,9 +685,19 @@ func (h *GroupsHandler) agentDefinitionPath(id string) (string, bool) {
 // object rode the request); assign=false removes the subject's binding
 // for policyName (or all its bindings when empty). Unknown policy on
 // assign is an error (dangling bindings fail boot validation).
+//
+// M8/D-2 lock discipline: the table mutation AND the config marshal both
+// happen under h.mu (marshal must see the mutated instant and pure CPU
+// work under a mutex is fine), but the FILE WRITE happens outside the
+// lock (AGENTS.md no-I/O-under-mutex rule; saveConfigAtomic's write side
+// is CreateTemp/Write/Close/Chmod/Rename). Concurrency safety without
+// holding the lock across the write: h.cfgSaveMu serializes writers so
+// two interleaved mutations cannot land their file writes out of order
+// (last-lock-winner); the bytes a writer puts in flight are always a
+// complete superset-consistent instant of the config, so a reader of the
+// file sees a valid config either way.
 func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *groups.Policy, scope string, assign bool) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	g := &h.cfg.Security.Groups
 
 	// Policy upsert (assign with a policy object only).
@@ -700,6 +733,7 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 
 	if assign {
 		if policyName == "" {
+			h.mu.Unlock()
 			return fmt.Errorf("policy name is required")
 		}
 		known := false
@@ -710,6 +744,7 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 			}
 		}
 		if !known {
+			h.mu.Unlock()
 			return fmt.Errorf("policy %q does not exist; define it before assigning", policyName)
 		}
 		if scope == "" {
@@ -718,6 +753,7 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 		// Duplicate binding is a no-op success (idempotent assign).
 		for _, b := range g.Bindings {
 			if b.Subject == subject && b.Policy == policyName {
+				h.mu.Unlock()
 				return nil
 			}
 		}
@@ -750,21 +786,55 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 		}
 		g.Bindings = kept
 		if removed == 0 && policyName != "" {
+			h.mu.Unlock()
 			return fmt.Errorf("no binding of policy %q for %s", policyName, subject)
 		}
 	}
 
 	// Persist (F3 legacy call shape rides this path too; cfgPath empty
 	// keeps the mutation in-memory only — tests construct handlers
-	// without a config path). Held under the mutex so a concurrent
-	// reader (saveConfigAtomic marshals the whole live config) never
-	// observes a half-built list.
+	// without a config path). Marshal UNDER the lock (the bytes must be
+	// the post-mutation instant), write OUTSIDE it (M8/D-2): the write
+	// is serialized against other writers by h.cfgSaveMu so a slower
+	// earlier write can never land after a faster later one.
 	if h.cfgPath != "" {
-		if err := saveConfigAtomic(h.cfgPath, h.cfg); err != nil {
+		data, err := marshalConfigJSON(h.cfg)
+		if err != nil {
+			h.mu.Unlock()
+			return fmt.Errorf("marshal groups config: %w", err)
+		}
+		h.mu.Unlock()
+		if err := h.persistConfigAtomic(data); err != nil {
 			return fmt.Errorf("persist groups config: %w", err)
 		}
+	} else {
+		h.mu.Unlock()
 	}
 	return nil
+}
+
+// marshalConfigJSON renders the live config as JSON bytes (the persist
+// side of saveConfigAtomic, split out for M8/D-2 so groups mutations can
+// run it UNDER h.mu — pure CPU — while the file write happens outside).
+// Uses JSON (not JSON5) — the JSON5 loader accepts plain JSON, so the
+// round-trip works.
+func marshalConfigJSON(cfg *config.Config) ([]byte, error) {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	return data, nil
+}
+
+// persistConfigAtomic writes already-marshalled config bytes to h.cfgPath
+// atomically (temp file + rename), serialized across concurrent writers by
+// h.cfgSaveMu (M8/D-2: the write runs OUTSIDE h.mu so groups.list readers
+// never block on disk; the writer-serialization lock preserves the
+// last-mutation-wins ordering the single-mutex version had).
+func (h *GroupsHandler) persistConfigAtomic(data []byte) error {
+	h.cfgSaveMu.Lock()
+	defer h.cfgSaveMu.Unlock()
+	return atomicWrite(h.cfgPath, data) //nolint:mutexio // cfgSaveMu exists to serialize this exact write (M8: ordered saves); h.mu is never held here
 }
 
 // mergeFSRoots unions two fs_root lists preserving order, trimming blanks
@@ -794,12 +864,15 @@ func mergeFSRoots(existing, add []string) []string {
 // creation through the amendment path — define the policy first). Returns
 // the number of roots added/removed. cfgPath empty keeps the mutation
 // in-memory only (test shape).
+//
+// M8/D-2 lock discipline (same shape as applyPolicyBinding): mutate +
+// marshal under h.mu, release, write the file outside the lock under
+// h.cfgSaveMu.
 func (h *GroupsHandler) amendPolicyFSRoots(policyName string, roots []string, add bool) (int, error) {
 	if h.cfg == nil {
 		return 0, fmt.Errorf("config not available")
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	g := &h.cfg.Security.Groups
 	idx := -1
 	for i := range g.Policies {
@@ -809,6 +882,7 @@ func (h *GroupsHandler) amendPolicyFSRoots(policyName string, roots []string, ad
 		}
 	}
 	if idx < 0 {
+		h.mu.Unlock()
 		return 0, fmt.Errorf("policy %q does not exist; define it before amending fs_roots", policyName)
 	}
 	before := len(g.Policies[idx].FSRoots)
@@ -835,9 +909,17 @@ func (h *GroupsHandler) amendPolicyFSRoots(policyName string, roots []string, ad
 		changed = -changed
 	}
 	if h.cfgPath != "" {
-		if err := saveConfigAtomic(h.cfgPath, h.cfg); err != nil {
+		data, err := marshalConfigJSON(h.cfg)
+		if err != nil {
+			h.mu.Unlock()
+			return 0, fmt.Errorf("marshal groups config: %w", err)
+		}
+		h.mu.Unlock()
+		if err := h.persistConfigAtomic(data); err != nil {
 			return 0, fmt.Errorf("persist groups config: %w", err)
 		}
+	} else {
+		h.mu.Unlock()
 	}
 	return changed, nil
 }
