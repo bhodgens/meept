@@ -128,7 +128,7 @@ func TestIssue179_ExtractPathFromTokenShapes(t *testing.T) {
 		{"/abs/path", "/abs/path"},
 		{"./rel", "./rel"},
 		{"~/home", "~/home"},
-		{"a..b", "a..b"}, // legacy: any ".." token was path-like; preserved
+		{"a..b", ""}, // M3: ".." not in path position — a bare word, not a path (was "a..b" under the old Contains rule)
 		{"KEY=", ""},
 		{"=", ""},        // legacy byte-identical: "=" is not path-like
 		{"/k=v", "/k=v"}, // legacy byte-identical: leading "/" wins, no split
@@ -158,3 +158,65 @@ func TestIssue179_RedirectUnaffectedByKvChange(t *testing.T) {
 		t.Error("outside redirect = nil, want denial")
 	}
 }
+
+// Bughunt 2026-11-27 M3 pins (audit S-5): ".." is judged in PATH POSITION.
+// The old `strings.Contains(value, "..")` rule classified format strings,
+// env values and bare words as paths, and since relative forms Abs against
+// the daemon cwd they were denied on every jail. The three audit shapes
+// must pass; genuine traversal must still be denied.
+func TestM3_NonPathDotDotTokensPass(t *testing.T) {
+	fc, root, _ := kv179Fixture(t)
+
+	for _, cmd := range []string{
+		"git log --format=%h..%s -5",
+		"echo a..b",
+		"env X=Y..Z printenv X",
+		"curl -H 'X=Y..Z' https://example.com",
+		"make CFLAGS=-std=c11..c17 target", // flag value containing ".."
+	} {
+		if err := fc.CheckCommand(cmd, root); err != nil {
+			t.Errorf("CheckCommand(%q) = %v, want nil (M3: \"..\" not in path position)", cmd, err)
+		}
+	}
+}
+
+func TestM3_GenuineTraversalStillDenied(t *testing.T) {
+	fc, root, _ := kv179Fixture(t)
+
+	for _, cmd := range []string{
+		"cat ../../../../etc/passwd",
+		"cat a/../b",
+		"cat ../sibling/secret",
+		"tar --file=../escape.tar -cf x",
+	} {
+		if err := fc.CheckCommand(cmd, root); err == nil {
+			t.Errorf("CheckCommand(%q) = nil, want denial (traversal must stay blocked)", cmd)
+		}
+	}
+}
+
+func TestM3_DevNullRedirectsPass(t *testing.T) {
+	fc, root, outside := kv179Fixture(t)
+
+	for _, cmd := range []string{
+		"make build 2>/dev/null",
+		"make build 2> /dev/null",
+		"make build 2>/dev/null 1>/dev/null",
+		"cmd 2>/dev/stderr",
+		"cmd >/dev/tty",
+	} {
+		if err := fc.CheckCommand(cmd, root); err != nil {
+			t.Errorf("CheckCommand(%q) = %v, want nil (M3: device redirect targets are not filesystem writes)", cmd, err)
+		}
+	}
+	// A REAL outside file redirect stays denied — the exemption is the
+	// device list only.
+	if err := fc.CheckCommand("make build 2>"+filepath.Join(outside, "log.txt"), root); err == nil {
+		t.Error("outside-file redirect = nil, want denial (device exemption must not widen)")
+	}
+}
+
+// Non-vacuity: reverting extractPathFromToken to Contains(value, "..")
+// turns TestM3_NonPathDotDotTokensPass red (all five shapes extract as
+// paths); deleting the devNullTargets exemption turns
+// TestM3_DevNullRedirectsPass red on the first shape.

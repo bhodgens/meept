@@ -372,11 +372,13 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 	tokens := tokenizeCommand(cmd)
 	for i, tok := range tokens {
 		// Check for shell redirection operators — the following token is
-		// the redirect target and must be validated as a write path.
+		// the redirect target and must be validated as a write path,
+		// EXCEPT the character devices (M3): `2>/dev/null` writes nothing
+		// retrievable and was over-blocked on every jail.
 		if tok == ">" || tok == ">>" || tok == "2>" || tok == "&>" || tok == "1>" {
 			if i+1 < len(tokens) {
 				target := extractPathFromToken(tokens[i+1])
-				if target != "" {
+				if target != "" && !devNullTargets[target] {
 					if err := fc.CheckPath(target, "write"); err != nil {
 						return fmt.Errorf("fence: redirect target outside project root: %q", target)
 					}
@@ -384,11 +386,11 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 			}
 			continue
 		}
-		// Check for inline redirection (e.g. ">/outside/file")
+		// Check for inline redirection (e.g. ">/outside/file", "2>/dev/null")
 		if strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, "2>") || strings.HasPrefix(tok, "&>") {
 			if remainder := strings.TrimLeft(tok, ">&12"); remainder != "" && remainder != tok {
 				target := extractPathFromToken(remainder)
-				if target != "" {
+				if target != "" && !devNullTargets[target] {
 					if err := fc.CheckPath(target, "write"); err != nil {
 						return fmt.Errorf("fence: redirect target outside project root: %q", target)
 					}
@@ -397,7 +399,7 @@ func (fc *FenceChecker) CheckCommand(cmd string, workDir string) error {
 			}
 		}
 		path := extractPathFromToken(tok)
-		if path == "" {
+		if path == "" || devNullTargets[path] {
 			continue
 		}
 		if err := fc.CheckPath(path, "read"); err != nil {
@@ -444,6 +446,18 @@ func tokenizeCommand(cmd string) []string {
 	return tokens
 }
 
+// devNullTargets are the character devices a redirect can point at without
+// touching the filesystem (bughunt 2026-11-27 M3 / audit S-5): `2>/dev/null`
+// was denied by every jail because "/dev/null" sits outside all session
+// roots. Redirecting INTO a device writes nothing an attacker keeps.
+var devNullTargets = map[string]bool{
+	"/dev/null":   true,
+	"/dev/stdout": true,
+	"/dev/stderr": true,
+	"/dev/zero":   true,
+	"/dev/tty":    true,
+}
+
 // extractPathFromToken checks whether a token carries a file path and
 // returns the path if so. Returns "" for non-path tokens (bare flags,
 // env vars, command names without path separators).
@@ -483,13 +497,25 @@ func extractPathFromToken(tok string) string {
 		return ""
 	}
 
-	// Skip single-token command names with no path component
-	// Absolute (/...), home (~...), parent-traversal (..), or explicit
-	// relative (./...) values are path-like.
+	// Single-token command names with no path component are not paths.
+	// Path-like: absolute (/...), home (~...), or explicit relative (./...)
+	// values — plus parent traversal, judged in PATH POSITION only
+	// (bughunt 2026-11-27 M3 / audit S-5): a "." inside a format string
+	// (--format=%h..%s), an env value (X=Y..Z), or a bare word (a..b) is
+	// not a filesystem path; treating any ".." substring as path-like
+	// denied those commands because the relative form Abs'd against the
+	// daemon cwd, outside every session fence. A traversal that can
+	// actually escape is still caught: the value starts with "../", is
+	// exactly "..", or carries "/../" inside (a/../b) — and since
+	// CheckPath Abs-anchors relative forms against the command workDir
+	// (the session dir under the H2 executor injection), an escaping
+	// relative traversal lands outside the fence root and is refused.
 	isPathLike := strings.HasPrefix(value, "/") ||
 		strings.HasPrefix(value, "~") ||
-		strings.Contains(value, "..") ||
-		strings.HasPrefix(value, "./")
+		strings.HasPrefix(value, "./") ||
+		value == ".." ||
+		strings.HasPrefix(value, "../") ||
+		strings.Contains(value, "/../")
 
 	if !isPathLike {
 		return ""
