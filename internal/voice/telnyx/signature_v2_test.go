@@ -22,11 +22,16 @@ package telnyx
 // untouched (raw-32 path must stay unbroken per §S task 1).
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -266,5 +271,99 @@ func TestConstantTimeSignatureMatch(t *testing.T) {
 	}
 	if constantTimeSignatureMatch("expected", []string{}) {
 		t.Error("zero-length candidate list must not match")
+	}
+}
+
+// ---- issue #159: per-path configurable future-skew window + WARN log ----
+
+// TestVerifyWebhook_FutureSkewConfigurable pins issue #159 acceptance:
+// (a) a timestamp 90s in the future is REJECTED under the default 60s
+// window (byte-identical legacy behavior); (b) the same timestamp is
+// ACCEPTED when the path configures a 120s window; (c) the rejection emits
+// a WARN carrying the path label, the measured drift, and the window.
+// Non-vacuity: with the knob ignored the (b) case fails; with the WARN
+// removed the (c) case fails.
+func TestVerifyWebhook_FutureSkewConfigurable(t *testing.T) {
+	pub, priv := genKeypair(t)
+	body := matrixWebhookBody()
+	ts := strconv.FormatInt(time.Now().Add(90*time.Second).Unix(), 10)
+	sig := signV2(t, priv, ts, body)
+	headers := http.Header{}
+	headers.Set("Telnyx-Signature-Ed25519", sig)
+	headers.Set("Telnyx-Timestamp", ts)
+
+	// (a) default window (60s): 90s future rejected on every entrypoint.
+	if err := VerifyWebhook([]byte(pub), sig, ts, body); err == nil {
+		t.Error("90s-future timestamp accepted under default 60s window, want rejection (#159 pin a)")
+	} else if !strings.Contains(err.Error(), "in the future") {
+		t.Errorf("90s-future rejection error = %v, want future-skew", err)
+	}
+	if err := VerifyWebhookSignature(body, headers, pub); err == nil {
+		t.Error("VerifyWebhookSignature: 90s-future accepted under default window, want rejection (#159 pin a)")
+	}
+	streamURL := "wss://example/media"
+	mediaHeaders := http.Header{}
+	mediaHeaders.Set("Telnyx-Signature-Ed25519", signV2(t, priv, ts, []byte(streamURL)))
+	mediaHeaders.Set("Telnyx-Timestamp", ts)
+	if err := VerifyMediaSocket(mediaHeaders, streamURL, pub); err == nil {
+		t.Error("VerifyMediaSocket: 90s-future accepted under default window, want rejection (#159 pin a)")
+	} else if !strings.Contains(err.Error(), "in the future") {
+		t.Errorf("VerifyMediaSocket default rejection = %v, want future-skew (#159 pin a)", err)
+	}
+
+	// (b) configured 120s window: the SAME timestamp verifies.
+	opts120 := VerifyOptions{Path: SkewPathVoiceWebhook, MaxFutureSkew: 120 * time.Second}
+	if err := VerifyWebhookSignatureWithOptions(body, headers, pub, opts120); err != nil {
+		t.Errorf("VerifyWebhookSignatureWithOptions(120s) = %v, want nil (#159 pin b)", err)
+	}
+	if err := VerifyMediaSocketWithOptions(mediaHeaders, streamURL, pub, VerifyOptions{Path: SkewPathMediaSocket, MaxFutureSkew: 120 * time.Second}); err != nil {
+		t.Errorf("VerifyMediaSocketWithOptions(120s) = %v, want nil (#159 pin b)", err)
+	}
+	// Zero-value options inherit the default (<=0 = package default).
+	if err := VerifyWebhookSignatureWithOptions(body, headers, pub, VerifyOptions{}); err == nil {
+		t.Error("zero-value VerifyOptions widened the window, want the 60s default (#159 pin b/default)")
+	}
+
+	// (c) the rejection logs WARN with the measured drift + path label.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf.Reset()
+	if err := VerifyWebhookSignatureWithOptions(body, headers, pub, VerifyOptions{Path: SkewPathSMSWebhook}); err == nil {
+		t.Fatal("default-window rejection expected before log check")
+	}
+	line := buf.String()
+	if !strings.Contains(line, "WARN") || !strings.Contains(line, "future-skew") {
+		t.Errorf("no WARN future-skew log line emitted, got: %q (#159 pin c)", line)
+	}
+	if !strings.Contains(line, SkewPathSMSWebhook) {
+		t.Errorf("WARN lacks path label %q, got: %q (#159 pin c)", SkewPathSMSWebhook, line)
+	}
+	// measured drift ~90s (allow parse slack: 80-100)
+	m := driftRE.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatalf("WARN lacks a drift= duration, got: %q (#159 pin c)", line)
+	}
+	if d, derr := time.ParseDuration(m[1]); derr != nil || d < 80*time.Second || d > 100*time.Second {
+		t.Errorf("WARN drift = %q, want ~90s (#159 pin c)", m[1])
+	}
+}
+
+var driftRE = regexp.MustCompile(`drift=(\S+)`)
+
+// TestSkewPathLabels pins the stable labels (issue #159) so the wiring and
+// any log-based alerting grep the same strings, and the VerifyOptions.Path
+// default resolves to the voice-webhook label.
+func TestSkewPathLabels(t *testing.T) {
+	if got := (VerifyOptions{}).path(); got != SkewPathVoiceWebhook {
+		t.Errorf("empty Path default = %q, want %q", got, SkewPathVoiceWebhook)
+	}
+	if got := (VerifyOptions{}).maxFuture(); got != DefaultSignatureFutureSkewWindow {
+		t.Errorf("zero MaxFutureSkew default = %v, want %v", got, DefaultSignatureFutureSkewWindow)
+	}
+	labels := map[string]bool{SkewPathVoiceWebhook: true, SkewPathMediaSocket: true, SkewPathSMSWebhook: true}
+	if len(labels) != 3 {
+		t.Fatal("path labels must be distinct")
 	}
 }

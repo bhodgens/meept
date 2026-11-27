@@ -72,7 +72,7 @@ calls are not gated).
 |---------|------|
 | `internal/sms` | durable inbound/outbound store (`sms_events_raw` + state table, idempotent event-id insert-ignore, monotonic upsert) + typed bus topics `sms.inbound.received` / `sms.state.changed` + the reply classifier + in-memory PendingConfirms registry (D4: durable registry belongs to the dispatch tree) |
 | `internal/telnyx` | outbound send leg: `SendSMS2` (per-message webhook_url + rate-limit errors), `SMSAttempt` (ordered send → DLR wait, `ResolvePending(providerMessageID, status)` wakes it), consent guard (`Attempt` refuses opted-out contacts with `contact.ErrOptedOut` BEFORE any HTTP call) |
-| `internal/voice/telnyx` | webhook ingress: signature v2 (ed25519, 300s-past/60s-future window), replay `NonceStore` (TTL 6m, LRU 10k), tolerant normalizer → the normalized `Message` the seams carry |
+| `internal/voice/telnyx` | webhook ingress: signature v2 (ed25519, 300s-past/60s-future default window; the future window is operator-tunable per path — `voice.future_skew_seconds`, SMS override `voice.messaging.future_skew_seconds`, issue #159; rejections log at WARN with the measured drift), replay `NonceStore` (TTL 6m, LRU 10k), tolerant normalizer → the normalized `Message` the seams carry |
 | `internal/comm/http` | `messaging.go` webhook route: 401 before any parse/nonce touch; success → 202; noop/unknown/duplicate → 200 ack (stops Telnyx redelivery); seam error → 500 (Telnyx redelivers) |
 | `internal/contact` | `messaging_opt_out` consent column (additive `ALTER ... NOT NULL DEFAULT 0`, guard-tolerant) consulted by ALL outbound sends (D5; voice consult deferred to the dispatch tree) |
 
@@ -126,6 +126,14 @@ Success → 202 (distinguishes "processed" from the ack-noop replies);
 noop/unknown event type → 200 ack; duplicate event id → 200 ack-noop
 (seam not called); bad signature → 401; malformed body → 400; seam
 error → 500 so Telnyx redelivers. Telnyx treats any 2xx as accepted.
+
+Future-skew 401s (issue #159): a 401 whose verifier error reads
+"timestamp is ... in the future" means the daemon clock runs ahead of
+Telnyx's by more than the SMS route's window (`voice.messaging.future_skew_seconds`
+> `voice.future_skew_seconds` > 60s default). Each rejection logs at WARN as
+`telnyx signature: future-skew rejection path=sms_webhook drift=...` — grep
+for `future-skew rejection` to confirm before widening. Prefer fixing NTP;
+the knob trades replay-harvesting protection for drift tolerance.
 
 ## Tests
 

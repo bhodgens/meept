@@ -1381,6 +1381,7 @@
   // OUTBOUND-ONLY gate: a null/empty list refuses ALL outbound dials
   // (fail-closed per the frozen C9 gate); configure explicit E.164 targets
   // before enabling outbound dial. Inbound calls are NOT gated by this list.
+  // drift: local-drift: voice.future_skew_seconds -> webhook future-skew knob added after older installs (issue #159); absent/0 = the 60s package default
   "voice": {
     "enabled": false,                       // master switch; sidecar absent when false
     "idle_stop_seconds": 30,                // stop the sidecar after this much idle time
@@ -1432,6 +1433,7 @@
     "reorder_window_frames": 10,            // audio reorder window (frames)
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)
     "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
+    "future_skew_seconds": 0,               // Telnyx webhook FUTURE-skew window for the voice call-control + media-socket paths (issue #159); 0/absent = the 60s package default; raise ONLY to cover measured NTP drift (rejections log at WARN with the drift; calls connecting but state events 401-ing = clock skew)
     "default_employee": "",                 // phone employee id owning inbound calls; required when enabled
     "default_leg": "phone",                 // phone | local; default leg for outbound voice
     "tts_model": "",                        // global TTS model (openai voice id etc.)
@@ -1497,6 +1499,7 @@
       "profile_id": "",                     // Telnyx Messaging Profile id
       "dlr_wait_seconds": 30,               // bounded wait for message.finalized before an attempt reports unavailable
       "webhook_base_url": "",               // scheme+host Telnyx webhooks target; empty = no webhook_url on sends
+      "future_skew_seconds": 0,             // Telnyx webhook FUTURE-skew window for the SMS route ONLY (issue #159); 0/absent inherits voice.future_skew_seconds, then the 60s package default; per-path so a voice drift workaround never silently loosens the SMS replay bound
       "stop_reply": "",                     // reply text for STOP/START consent keywords (empty = package default wording)
       "help_reply": "",                     // reply text for HELP (empty = package default wording)
       "inbound_enabled": false,             // D3 kill switch for inbound SMS leg; default false = byte-identical boot

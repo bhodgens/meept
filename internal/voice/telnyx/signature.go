@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,6 +24,13 @@ const DefaultSignatureSkewWindow = 300 * time.Second
 // vector at worst). Ported asymmetry from strategist-usa
 // go-web-hooks/internal/webhook/signature.go:247-263 (5m past / 1m future);
 // the frozen meept contract pins 300s past / 60s future.
+//
+// Issue #159: the 60s future window is the DEFAULT, no longer a hard pin.
+// The same verify path serves voice call-control, media-socket, and SMS
+// webhooks; a daemon whose clock drifts >60s ahead of Telnyx's hard-401s
+// EVERY voice webhook (calls connect but state events silently stop).
+// Operators widen it per-path via voice.future_skew_seconds /
+// voice.messaging.future_skew_seconds (0 = this default).
 const DefaultSignatureFutureSkewWindow = 60 * time.Second
 
 // spkiDERHeader is the ASN.1 DER encoding prefix for ED25519 SPKI keys.
@@ -37,6 +45,15 @@ var spkiDERHeader = []byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70,
 const (
 	headerSignature = "Telnyx-Signature-Ed25519"
 	headerTimestamp = "Telnyx-Timestamp"
+)
+
+// Verification-path labels for the future-skew WARN (issue #159): the log
+// line names WHICH webhook path rejected, so an operator seeing repeated
+// lines on one path only can widen that path's window.
+const (
+	SkewPathVoiceWebhook = "voice_webhook"
+	SkewPathMediaSocket  = "media_socket"
+	SkewPathSMSWebhook   = "sms_webhook"
 )
 
 // signedString builds the string the account private key signs:
@@ -71,13 +88,25 @@ func parseTelnyxTimestamp(ts string) (time.Time, error) {
 // already-parsed timestamp: reject anything older than maxPast or newer than
 // now+maxFuture. Ported from strategist-usa
 // go-web-hooks/internal/webhook/signature.go:247-263.
-func checkTimestampSkew(ts time.Time, maxPast, maxFuture time.Duration) error {
+//
+// Issue #159: a FUTURE-skew rejection logs at WARN with the measured drift
+// (timestamp minus now) and the configured window, so a clock-skew problem
+// surfaces in the daemon log BEFORE every webhook on the path silently 401s.
+// The past-skew branch stays log-free: old redeliveries are routine
+// provider behavior, while a future-dated timestamp is either NTP drift or
+// replay-harvesting — both worth an operator-visible line.
+func checkTimestampSkew(ts time.Time, maxPast, maxFuture time.Duration, path string) error {
 	age := time.Since(ts)
 	if age > maxPast {
 		return fmt.Errorf("telnyx signature: timestamp is %s old, exceeds replay window %s", age.Truncate(time.Second), maxPast)
 	}
 	if age < -maxFuture {
-		return fmt.Errorf("telnyx signature: timestamp is %s in the future, exceeds clock-drift window %s", (-age).Truncate(time.Second), maxFuture)
+		drift := -age
+		slog.Warn("telnyx signature: future-skew rejection",
+			"path", path,
+			"drift", drift.Round(time.Millisecond),
+			"max_future_window", maxFuture)
+		return fmt.Errorf("telnyx signature: timestamp is %s in the future, exceeds clock-drift window %s", drift.Truncate(time.Second), maxFuture)
 	}
 	return nil
 }
@@ -133,7 +162,7 @@ func normalizePublicKey(pubKey []byte) (ed25519.PublicKey, error) {
 // entrypoints: header/signature hygiene, timestamp parse (unix or RFC3339),
 // asymmetric skew, key normalization, Ed25519 verify over
 // "{timestamp}|{message}".
-func verifyWebhookCore(message []byte, sigB64, tsHeader string, pubKey []byte, maxPast, maxFuture time.Duration) error {
+func verifyWebhookCore(message []byte, sigB64, tsHeader string, pubKey []byte, maxPast, maxFuture time.Duration, path string) error {
 	sig, err := decodeSignature(sigB64)
 	if err != nil {
 		return err
@@ -145,7 +174,7 @@ func verifyWebhookCore(message []byte, sigB64, tsHeader string, pubKey []byte, m
 	if err != nil {
 		return err
 	}
-	if err := checkTimestampSkew(ts, maxPast, maxFuture); err != nil {
+	if err := checkTimestampSkew(ts, maxPast, maxFuture, path); err != nil {
 		return err
 	}
 	pub, err := normalizePublicKey(pubKey)
@@ -170,19 +199,51 @@ func verifyWebhookCore(message []byte, sigB64, tsHeader string, pubKey []byte, m
 //
 // The skew window is asymmetric: 300s into the past, 60s into the future
 // (v1's symmetric ±300 must NOT survive here — a future-dated replay is a
-// replay-harvesting vector that the past window alone would admit).
+// replay-harvesting vector that the past window alone would admit). The
+// 60s future window is the DEFAULT (issue #159); per-path overrides go
+// through VerifyWebhookSignatureWithOptions / VerifyMediaSocketWithOptions.
 func VerifyWebhook(pubKey []byte, sigB64, tsHeader string, body []byte) error {
 	return verifyWebhookCore(body, sigB64, tsHeader, pubKey,
-		DefaultSignatureSkewWindow, DefaultSignatureFutureSkewWindow)
+		DefaultSignatureSkewWindow, DefaultSignatureFutureSkewWindow, SkewPathVoiceWebhook)
+}
+
+// VerifyOptions configures one verify seam (issue #159): the future-skew
+// window and the log label for the path it serves. The SAME Ed25519
+// verification serves voice call-control, media-socket, and SMS webhooks;
+// the 60s future tightening was applied to all of them at once, so the
+// window became a per-path OPERATOR decision instead of a hard pin.
+type VerifyOptions struct {
+	// Path labels the future-skew WARN ("voice_webhook", "media_socket",
+	// "sms_webhook", or a caller-chosen string; empty = "webhook").
+	Path string
+	// MaxFutureSkew bounds how far AHEAD of local time a
+	// telnyx-timestamp may run before rejection. <= 0 selects
+	// DefaultSignatureFutureSkewWindow (60s), preserving the behavior
+	// pinned before issue #159.
+	MaxFutureSkew time.Duration
+}
+
+func (o VerifyOptions) path() string {
+	if o.Path == "" {
+		return SkewPathVoiceWebhook
+	}
+	return o.Path
+}
+
+func (o VerifyOptions) maxFuture() time.Duration {
+	if o.MaxFutureSkew <= 0 {
+		return DefaultSignatureFutureSkewWindow
+	}
+	return o.MaxFutureSkew
 }
 
 // verifySignedMessage is the shared core of the v1 header-based verifiers:
 // pull the signature/timestamp headers off an http.Header, then run the v2
 // core. Raw-32-byte ed25519.PublicKey inputs take the same accept path as
 // before (byte-identical behavior for the existing key type).
-func verifySignedMessage(message []byte, headers http.Header, pub ed25519.PublicKey, maxPast, maxFuture time.Duration) error {
+func verifySignedMessage(message []byte, headers http.Header, pub ed25519.PublicKey, maxPast, maxFuture time.Duration, path string) error {
 	return verifyWebhookCore(message, headers.Get(headerSignature), headers.Get(headerTimestamp),
-		[]byte(pub), maxPast, maxFuture)
+		[]byte(pub), maxPast, maxFuture, path)
 }
 
 // VerifyWebhookSignature verifies a Telnyx API v2 webhook delivery:
@@ -193,7 +254,14 @@ func verifySignedMessage(message []byte, headers http.Header, pub ed25519.Public
 // DefaultSignatureSkewWindow into the past, DefaultSignatureFutureSkewWindow
 // into the future; a missing header is always an error.
 func VerifyWebhookSignature(body []byte, headers http.Header, pub ed25519.PublicKey) error {
-	return verifySignedMessage(body, headers, pub, DefaultSignatureSkewWindow, DefaultSignatureFutureSkewWindow)
+	return VerifyWebhookSignatureWithOptions(body, headers, pub, VerifyOptions{})
+}
+
+// VerifyWebhookSignatureWithOptions is VerifyWebhookSignature with a
+// caller-configured future-skew window (issue #159). Zero options are
+// byte-identical to VerifyWebhookSignature.
+func VerifyWebhookSignatureWithOptions(body []byte, headers http.Header, pub ed25519.PublicKey, opts VerifyOptions) error {
+	return verifySignedMessage(body, headers, pub, DefaultSignatureSkewWindow, opts.maxFuture(), opts.path())
 }
 
 // VerifyMediaSocket verifies the signature headers on a media-socket
@@ -202,7 +270,17 @@ func VerifyWebhookSignature(body []byte, headers http.Header, pub ed25519.Public
 // Header names and skew rules match VerifyWebhookSignature; a missing
 // header is always an error.
 func VerifyMediaSocket(headers http.Header, streamURL string, pub ed25519.PublicKey) error {
-	return verifySignedMessage([]byte(streamURL), headers, pub, DefaultSignatureSkewWindow, DefaultSignatureFutureSkewWindow)
+	return VerifyMediaSocketWithOptions(headers, streamURL, pub, VerifyOptions{Path: SkewPathMediaSocket})
+}
+
+// VerifyMediaSocketWithOptions is VerifyMediaSocket with a
+// caller-configured future-skew window (issue #159). Zero options are
+// byte-identical to VerifyMediaSocket.
+func VerifyMediaSocketWithOptions(headers http.Header, streamURL string, pub ed25519.PublicKey, opts VerifyOptions) error {
+	if opts.Path == "" {
+		opts.Path = SkewPathMediaSocket
+	}
+	return verifySignedMessage([]byte(streamURL), headers, pub, DefaultSignatureSkewWindow, opts.maxFuture(), opts.path())
 }
 
 // constantTimeSignatureMatch compares an expected signature against a list

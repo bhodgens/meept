@@ -6167,12 +6167,24 @@ type VoiceConfig struct {
 	ReorderWindowFrames int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
 	ReorderGapMs        int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
 	TelnyxPublicKey     string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath     string `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr   string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee     string `json:"default_employee"       toml:"default_employee"`
-	DefaultLeg          string `json:"default_leg"            toml:"default_leg"`
-	TTSModel            string `json:"tts_model"             toml:"tts_model"`
-	TTSVoice            string `json:"tts_voice"             toml:"tts_voice"`
+	// FutureSkewSeconds (json future_skew_seconds) overrides the Telnyx
+	// webhook FUTURE-skew window for the voice call-control and
+	// media-socket verify paths (issue #159). The shipped default is 60s
+	// (telnyx.DefaultSignatureFutureSkewWindow); 0/negative inherits it.
+	// A daemon whose clock runs >window ahead of Telnyx's otherwise
+	// hard-401s every voice webhook (calls connect, state events stop
+	// silently). Raise it ONLY to cover measured NTP drift; the window
+	// bounds replay-harvesting, so the past window stays pinned at 300s.
+	// Future-skew rejections log at WARN with the measured drift.
+	// Per-path override for the SMS webhook: voice.messaging.
+	// future_skew_seconds (row wins for the messaging route only).
+	FutureSkewSeconds int    `json:"future_skew_seconds" toml:"future_skew_seconds"`
+	ChildBinaryPath   string `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee   string `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg        string `json:"default_leg"            toml:"default_leg"`
+	TTSModel          string `json:"tts_model"             toml:"tts_model"`
+	TTSVoice          string `json:"tts_voice"             toml:"tts_voice"`
 	// TTSRefAudio (json tts_ref_audio) is the path to the CLONE
 	// REFERENCE WAV the qwen3 custom voice is keyed on (plan
 	// 20261113-filler-clips leaf 02). The OpenAI-compatible shim never
@@ -6391,6 +6403,15 @@ type MessagingConfig struct {
 	// is sent on sends; the contact channel derives
 	// {base}/api/v1/voice/messaging/webhook when set. Zero default.
 	WebhookBaseURL string `json:"webhook_base_url" toml:"webhook_base_url"`
+	// FutureSkewSeconds overrides the Telnyx webhook FUTURE-skew window
+	// for the SMS/messaging webhook route ONLY (issue #159). 0/negative
+	// inherits voice.future_skew_seconds, which itself inherits the
+	// 60s package default (telnyx.DefaultSignatureFutureSkewWindow).
+	// The same Ed25519 verifier serves voice and SMS paths; the knob is
+	// per-path so a voice-only clock-drift workaround never silently
+	// loosens the SMS replay bound (or vice versa). Future-skew
+	// rejections log at WARN with the measured drift.
+	FutureSkewSeconds int `json:"future_skew_seconds" toml:"future_skew_seconds"`
 	// StopReply is the confirmation text sent after a STOP/START consent
 	// keyword (zero default: the reply WORDING defaults live in the sms
 	// pkg per the master serialization note, not in schema.go).

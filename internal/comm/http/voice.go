@@ -82,6 +82,20 @@ type VerifyFuncs struct {
 	// Media verifies the Ed25519 headers against the exact stream_url the
 	// daemon told Telnyx to dial (Manager.StreamURL, never re-derived).
 	Media func(headers http.Header, streamURL string) error
+	// MessagingWebhook (issue #159) verifies the SMS webhook with the
+	// messaging path's own future-skew window. Nil falls back to Webhook
+	// (the pre-#159 shared verifier), so an existing hand-built
+	// VerifyFuncs stays byte-identical.
+	MessagingWebhook func(body []byte, headers http.Header) error
+}
+
+// MessagingVerify returns the verifier the messaging route must use:
+// MessagingWebhook when set, else Webhook (issue #159 fallback).
+func (v VerifyFuncs) MessagingVerify() func(body []byte, headers http.Header) error {
+	if v.MessagingWebhook != nil {
+		return v.MessagingWebhook
+	}
+	return v.Webhook
 }
 
 // StartFrame is the parsed Telnyx media-socket start frame: which call the

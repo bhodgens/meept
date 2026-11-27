@@ -147,6 +147,20 @@ stay mandatory on both listeners — plain HTTP never relaxes them.
   before accepting the upgrade. Do not accept with origin checks skipped
   and no signature (uptractor used `InsecureSkipVerify`; do not copy that).
 
+The skew window is asymmetric: `voice.future_skew_seconds` bounds how far
+AHEAD of local time a Telnyx timestamp may run (default 60s; 0/absent = the
+package default), while the past window stays pinned at 300s. Incident
+guidance (issue #159): if calls connect but state events stop arriving —
+every webhook 401s with "timestamp is ... in the future" — the daemon clock
+is running more than the window ahead of Telnyx's. The verifier logs each
+future-skew rejection at WARN with the path (`voice_webhook` /
+`media_socket` / `sms_webhook`) and the measured drift, so grep the daemon
+log for `future-skew rejection` first; fix NTP if the drift grows, or widen
+the per-path window (`voice.future_skew_seconds`, SMS override
+`voice.messaging.future_skew_seconds`) as the operator knob. Widening the
+window trades replay-harvesting protection for tolerance of clock drift —
+raise it only to cover the measured drift.
+
 The Ed25519 public key comes from the Telnyx Mission Control portal and is
 stored like other provider material. The API token stays in the secrets
 broker as a `Broker.Value` caller (add the caller to
