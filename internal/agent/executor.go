@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -2234,12 +2235,95 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 	// against tools.WorkingDirFromContext before the check — byte-
 	// identical whenever the arg is already absolute or no turn dir is
 	// bound.
-	if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+	// Bughunt 2026-11-27 H3 (tilde join bypass): a raw "~"-prefixed arg must
+	// NOT be joined against the turn dir. filepath.IsAbs("~/x") is false, so
+	// the naive Join produced "<turn-dir>/~/x" — the checker judged a path
+	// inside the session jail while the filesystem tools (resolvePath /
+	// resolvePathSecure, internal/tools/builtin/filesystem.go) expand the
+	// leading "~" to os.UserHomeDir() and touch the REAL target. The blocked
+	// globs (~/.ssh/*, ~/.gnupg/*) were defeated the same way: expandPathAll
+	// expands "~" on the pattern side but received "<turn>/~/.ssh/id_rsa" on
+	// the path side. Mirror resolvePath exactly: expand "~" FIRST, then the
+	// turn-dir join for the remainder. An unresolvable home keeps the raw
+	// form (the fence/globs then judge it as-is — the pre-e3a8a3e8 posture).
+	wd := tools.WorkingDirFromContext(ctx)
+	if wd != "" {
 		for _, key := range []string{"path", "file_path"} {
-			if raw := details[key]; raw != "" && !filepath.IsAbs(raw) {
-				details[key] = filepath.Join(wd, raw)
+			raw := details[key]
+			if raw == "" {
+				continue
 			}
+			expanded := raw
+			if strings.HasPrefix(expanded, "~") {
+				if home, err := os.UserHomeDir(); err == nil {
+					expanded = filepath.Join(home, expanded[1:])
+				} else {
+					continue
+				}
+			}
+			if !filepath.IsAbs(expanded) {
+				expanded = filepath.Join(wd, expanded)
+			}
+			details[key] = expanded
 		}
+	}
+
+	// Bughunt 2026-11-27 H2 (fence-vs-shell key mismatch): the shell tool
+	// resolves its directory via resolveShellWorkingDir
+	// (internal/tools/builtin/shell.go) in the precedence:
+	//
+	//  1. args["working_dir"] (resolvePath: "~" -> $HOME, relative -> the
+	//     turn's session dir, absolute kept);
+	//  2. tools.WorkingDirFromContext(ctx) — the turn's session dir;
+	//  3. the tool's explicitly-configured workingDir;
+	//  4. an actionable NoWorkingDirError.
+	//
+	// The central fence arm (pkg/security/permissions.go) reads
+	// details["working_dir"], but this details map carried neither that key
+	// nor the tool's "workdir" alias, so the fence always judged "." —
+	// Abs'd against the DAEMON cwd — and the model-supplied working_dir
+	// passed entirely unchecked. Inject the resolution the tool will
+	// actually use (steps 1+2; step 3 is construction-time and unreachable
+	// on the daemon's agent-path tool, step 4 errors before permission
+	// checks matter) so the fence judges the SAME directory the tool runs
+	// in. Byte-identical when neither source is bound (the key stays
+	// absent and the arm's own "." default applies). shell() is checked
+	// first because ToolActionMap maps it to shell_execute too.
+	if (toolName == "shell" || action == "shell_execute") && details["working_dir"] == "" {
+		resolved := ""
+		if raw := details["workdir"]; raw != "" { // legacy alias key
+			if strings.HasPrefix(raw, "~") {
+				if home, err := os.UserHomeDir(); err == nil {
+					raw = filepath.Join(home, raw[1:])
+				}
+			}
+			if !filepath.IsAbs(raw) {
+				raw = filepath.Join(wd, raw)
+			}
+			resolved = raw
+		}
+		if resolved == "" {
+			resolved = wd
+		}
+		if resolved != "" {
+			details["working_dir"] = resolved
+		}
+	}
+
+	// Bughunt 2026-11-27 M4 (git_* unjudged): the git family
+	// (git_commit/git_split -> shell_execute, git_validate/git_overview ->
+	// file_read) executes with cmd.Dir = the tool's construction-time
+	// workingDir when the call omits working_dir, and that field is ""
+	// for the daemon-registered tools (components.go NewGit*Tool("")) —
+	// i.e. they run in the DAEMON PROCESS CWD (cmd.Dir == "" means "use
+	// the caller's dir", exec.Cmd). The central git_ arm skips exactly
+	// that case ("an absent working_dir means the tool runs in its own
+	// session-bound cwd" — false premise). Inject the turn's session dir
+	// so the fence judges the directory the git commands actually run in,
+	// mirroring what the shell arm above now does. Byte-identical when no
+	// turn dir is bound (the arm's skip stays).
+	if strings.HasPrefix(toolName, "git_") && details["working_dir"] == "" && wd != "" {
+		details["working_dir"] = wd
 	}
 
 	// Inject the tool name so the pre-exec checker (employee constitution

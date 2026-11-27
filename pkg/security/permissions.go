@@ -371,6 +371,19 @@ func (pc *PermissionChecker) snapshotFence() FenceStage {
 	return pc.fence
 }
 
+// FenceStageSet reports whether a fence stage is installed (bughunt H4
+// voice/employee lane arm: callers that must distinguish "checker carries
+// a session jail" from "glob-only base checker" ask here instead of
+// reaching into internals). Concurrency-safe.
+func (pc *PermissionChecker) FenceStageSet() bool {
+	if pc == nil {
+		return false
+	}
+	pc.fenceMu.RLock()
+	defer pc.fenceMu.RUnlock()
+	return pc.fence != nil
+}
+
 // reflectValueOf reflects ValueOf(fence), localized so the reflect import
 // stays next to its only use.
 func reflectValueOf(v FenceStage) reflect.Value { return reflect.ValueOf(v) }
@@ -715,7 +728,21 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 				fenceErr = fence.CheckPath(path, op)
 			}
 		case "shell_execute":
-			workDir := details["workdir"]
+			// Bughunt 2026-11-27 H2 (fence-vs-shell key mismatch): the
+			// shell tool's arg key is "working_dir"
+			// (internal/tools/builtin/shell.go resolveShellWorkingDir);
+			// this arm read only "workdir", a key no production caller
+			// sets, so the fence always judged "." — Abs'd against the
+			// DAEMON process cwd — and every model-supplied working_dir
+			// passed the path check unchecked. Read the tool's key first
+			// and keep "workdir" as a legacy/test alias fallback. The
+			// executor additionally injects the tool-resolved directory
+			// (internal/agent/executor.go checkPermission) so the fence
+			// sees the same dir the tool will run in.
+			workDir := details["working_dir"]
+			if workDir == "" {
+				workDir = details["workdir"]
+			}
 			if workDir == "" {
 				workDir = "."
 			}
