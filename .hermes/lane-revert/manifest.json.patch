@@ -1,0 +1,29 @@
+diff --git a/e2e/manifest.json b/e2e/manifest.json
+index ad60c0b0..0a5e3f63 100644
+--- a/e2e/manifest.json
++++ b/e2e/manifest.json
+@@ -3710,24 +3722,6 @@
+         "internal/llm/provider_manager.go"
+       ]
+     },
+-    {
+-      "id": "continuity-regressions-11",
+-      "suite": "continuity-regressions",
+-      "diff": "M",
+-      "title": "per-model transient_retries absorbs a mid-request connection kill (EOF, no status) by re-dialing the SAME provider; the fallback stays untouched",
+-      "paths": [
+-        "internal/llm/client.go"
+-      ]
+-    },
+-    {
+-      "id": "continuity-regressions-12",
+-      "suite": "continuity-regressions",
+-      "diff": "S",
+-      "title": "transient_retries ABSENT (default 0): a connection kill surfaces to the rotation layer and lands on the fallback provider (byte-identical pre-feature behavior)",
+-      "paths": [
+-        "internal/llm/client.go"
+-      ]
+-    },
+     {
+       "id": "plan-lifecycle-01",
+       "suite": "plan-lifecycle",

@@ -1,0 +1,12 @@
+diff --git a/internal/daemon/components.go b/internal/daemon/components.go
+index af7e9bff..91b06a62 100644
+--- a/internal/daemon/components.go
++++ b/internal/daemon/components.go
+@@ -9715,7 +9766,6 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger, loopbac
+ 			Temperature:          model.Temperature,
+ 			ContextLimit:         model.ContextLimit,
+ 			Capabilities:         caps,
+-			TransientRetries:     model.TransientRetries,
+ 		})
+ 
+ 		logger.Debug("Added provider config",
