@@ -57,6 +57,51 @@ func TestRelayErrorRestoresTypedCauseForClassifiers(t *testing.T) {
 	}
 }
 
+// TestRelayCauseRestoresWrappedProductionShape pins the fixwave 2026-11-27
+// M6 fix (bughunt A-4): every production producer of a failed task's relayed
+// result WRAPS the verdict before it reaches this seam, so relayCause must
+// restore the typed cause from the wrapped shape, not only from the bare
+// sentinel prefix. Each producer prefix is the real fmt.Errorf wrap text:
+// daemon/components.go "agent execution failed: %w",
+// tactical.go "step X has validation error:" / "reviewer error: ",
+// planner "planning failed: ".
+func TestRelayCauseRestoresWrappedProductionShape(t *testing.T) {
+	verdict := (&llm.ContextTooSmallError{
+		ProviderID:   "openai",
+		ModelID:      "gpt-x",
+		EstInput:     90000,
+		Reserve:      4096,
+		ContextLimit: 8192,
+	}).Error()
+	for _, producer := range []string{
+		"agent execution failed: ",
+		"step stp-1 has validation error: ",
+		"reviewer error: ",
+		"planning failed: ",
+	} {
+		text := producer + verdict
+		cause := relayCause(text)
+		if !llm.IsContextTooSmall(cause) {
+			t.Errorf("relayCause(%q) lost the context-too-small typing", text)
+			continue
+		}
+		var te *llm.ContextTooSmallError
+		if !errors.As(cause, &te) {
+			t.Errorf("relayCause(%q) did not recover the typed verdict", text)
+			continue
+		}
+		// Numeric fields parse from the wrapped tail, not fabricated.
+		if te.EstInput != 90000 || te.ContextLimit != 8192 || te.ProviderID != "openai" || te.ModelID != "gpt-x" {
+			t.Errorf("relayCause(%q) fields = %+v, want parsed provider/model/est_input/context_limit", text, te)
+		}
+		// And through the full relay wrapper the user still gets the
+		// actionable sentence.
+		if s := UserFacingError(&RelayError{Text: text, Cause: cause}); s != ErrSentenceContextTooSmall {
+			t.Errorf("UserFacingError(%q) = %q, want the context-too-small sentence", text, s)
+		}
+	}
+}
+
 // TestRelayErrorTierFloorQuotaEmpty: the other three sentinel shapes
 // restore typing and their user sentences.
 func TestRelayErrorTierFloorQuotaEmpty(t *testing.T) {

@@ -45,8 +45,20 @@ func (r *RelayError) Unwrap() error {
 
 // Machine-sentinel shapes this package can restore from relayed text. The
 // llm error types render as "<sentinel>: provider=... model=..." (see
-// llm.ContextTooSmallError.Error / llm.TierFloorError.Error), so a prefix
-// match is exact by construction: the sentinel text itself is constant.
+// llm.ContextTooSmallError.Error / llm.TierFloorError.Error).
+//
+// Fixwave 2026-11-27 (bughunt A-4/M6): the match is strings.Contains, not
+// HasPrefix. Every production producer of a failed task's relayed result
+// WRAPS the verdict before it reaches this seam — components.go
+// "agent execution failed: %w", tactical.go "step X has validation error:",
+// "reviewer error: ", and the planner's "planning failed: " lane — so a
+// prefix match never fired on real relay text and the M8 typing restore was
+// dead in production. The sentinel constants are unique repo-minted strings
+// this package never accepts from user prose (the garbage pin below), so
+// containment cannot over-match a non-context-too-small error: the verdict
+// carries the structured provider=/model=/est_input= tail the regexes parse,
+// and no producer legitimately embeds the sentinel inside a different error
+// class (grep-verified across the producers above).
 var (
 	relayContextTooSmallRe = regexp.MustCompile(`(?i)\best_input=(\d+)\b.*?\bcontext_limit=(\d+)\b`)
 	relayProviderIDRe      = regexp.MustCompile(`(?i)\bprovider=([^\s:,]+)`)
@@ -65,7 +77,7 @@ func relayCause(text string) error {
 		return nil
 	}
 	switch {
-	case strings.HasPrefix(text, llm.ErrContextTooSmall.Error()):
+	case strings.Contains(text, llm.ErrContextTooSmall.Error()):
 		te := &llm.ContextTooSmallError{}
 		if m := relayContextTooSmallRe.FindStringSubmatch(text); m != nil {
 			te.EstInput = atoiSafe(m[1])
