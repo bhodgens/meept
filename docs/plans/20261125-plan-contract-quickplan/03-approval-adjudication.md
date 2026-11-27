@@ -54,3 +54,8 @@ intent.ApprovalRequested — park vs auto-approve), ed3d182d, f182dea6
 (regex verdict deletion). Remaining handler.go AutoSeal-wiring deletion
 is listed in 02-compound-oneshot.md Status (handler.go:2158, inert
 false-stub call).
+
+Update 2026-11-27: that follow-up LANDED — bac3e89e deleted the handler
+producer, the PlanRequest.AutoSeal field, the requiresApproval bypass
+arm, autoSealPlanAudit, and the false stub end to end. Zero non-comment
+AutoSeal references remain repo-wide.
