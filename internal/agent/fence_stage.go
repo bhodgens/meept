@@ -45,21 +45,71 @@ type sessionFenceFactory func(rootPath string, noFence bool) security.FenceStage
 // i.e. no fence, matching the legacy unrooted posture).
 func newSessionFenceFactory(logger *slog.Logger) sessionFenceFactory {
 	return func(rootPath string, noFence bool) security.FenceStage {
-		if rootPath == "" {
-			return nil
-		}
-		if noFence {
-			return nil
-		}
-		fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
-			Enabled:  true,
-			RootPath: rootPath,
-			// System reads outside the root stay allowed, matching the
-			// daemon template's posture (allow-read-only-outsiders).
-			AllowRead: []string{"/usr", "/bin", "/sbin", "/etc"},
-		}, logger)
-		return security.NewFenceStageAdapter(fc)
+		// Issue #157 re-home: the minting lives in NewSessionFenceStage
+		// (the single production construction point the daemon closures
+		// also call), so the #138 per-session jail semantics engage on
+		// the central FenceStage instead of the retired per-tool
+		// fenceChecker field. The AllowRead list below is the
+		// pre-jail template posture kept for parity; under the jail an
+		// out-of-session read is refused even when AllowRead admits it.
+		return NewSessionFenceStage(rootPath, []string{"/usr", "/bin", "/sbin", "/etc"}, noFence, logger)
 	}
+}
+
+// jailedFenceStage applies the #138 per-session path jail at the CENTRAL
+// FenceStage seam (issue #157 re-home). The jail lives HERE, on the
+// session-rooted stage the daemon mints per loop, because the per-tool
+// fenceChecker wiring it originally shipped on was retired (agent-groups
+// leaf 01 T3) and the jail never engaged in production: only the shell
+// tool still receives a per-tool checker (internal/services/
+// terminal_service.go), and the filesystem tools' checkPathJailed gate
+// stayed nil for every daemon session.
+//
+// The jail narrows the fence in both directions (internal/security/
+// fence.go CheckPathJailed contract, jail == the session worktree):
+//   - a path inside the session root is allowed unconditionally,
+//     short-circuiting the fence's own allowlist;
+//   - a path outside it is refused even when AllowRead would admit it.
+//
+// Symlink resolution happens inside CheckPathJailed on both sides, so a
+// link inside the session root that lands outside it is refused.
+// CheckCommand keeps the plain checker posture (the command surface is
+// the rig-wide fence contract, unchanged by #157).
+type jailedFenceStage struct {
+	fc       intsecurity.JailedFenceChecker
+	jailRoot string
+}
+
+func (s jailedFenceStage) CheckPath(path, op string) error {
+	return s.fc.CheckPathJailed(path, op, s.jailRoot)
+}
+
+func (s jailedFenceStage) CheckCommand(command, workDir string) error {
+	return s.fc.CheckCommand(command, workDir)
+}
+
+// NewSessionFenceStage mints the production per-session fence stage: a
+// FRESH FenceChecker rooted at the session's working directory, wrapped so
+// the stage itself enforces the #138 jail narrowing (issue #157). Every
+// session lane (daemon components.go factory closures, this package's
+// sessionFenceFactory) must mint through this one function so the jail
+// posture cannot drift between call sites.
+//
+// A nil stage (no fence) is returned for an empty rootPath or a
+// --nofence session, matching the legacy posture byte-for-byte: unbound
+// sessions and explicit no-fence overrides outrank the jail, exactly as
+// FenceConfig.NoFence outranks it inside CheckPathJailed.
+func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, logger *slog.Logger) security.FenceStage {
+	rootPath = strings.TrimSpace(rootPath)
+	if rootPath == "" || noFence {
+		return nil
+	}
+	fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
+		Enabled:   true,
+		RootPath:  rootPath,
+		AllowRead: allowRead,
+	}, logger)
+	return security.NewFenceStageAdapter(jailedFenceStage{fc: fc, jailRoot: rootPath})
 }
 
 // injectSessionFenceStage clones base and installs the given session fence
