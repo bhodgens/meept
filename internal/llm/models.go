@@ -812,3 +812,11 @@ func (e *StreamAbortedError) Error() string {
 	}
 	return fmt.Sprintf("stream aborted by rule %q", e.RuleName)
 }
+
+// NonRetryable (bughunt M2): a TTSR abort is a caller-policy decision, not
+// a transport flake — the transient re-dial lane must never re-dial it.
+// The Error() text embeds the user-authored rule condition verbatim, so
+// without this a rule like \bEOF\b classified as a transport death and the
+// re-dial bypassed the already-fired MarkInjected. Pinned by
+// TestTransientTransportError_StreamAbortedErrorNeverTransient.
+func (e *StreamAbortedError) NonRetryable() bool { return true }

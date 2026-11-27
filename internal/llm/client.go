@@ -277,13 +277,19 @@ func isTransientTransportError(err error) bool {
 	}
 	// http2 / transport wrappers that carry no typed cause (rare): the
 	// client's own wrappers stamp these message prefixes at the read and
-	// dial sites.
+	// dial sites. Bughunt L9: the bare 3-char "EOF" marker was removed —
+	// ANY untyped error mentioning those three letters classified as
+	// transient (the M2 shape: a TTSR StreamAbortedError whose condition
+	// contains "EOF"). io.EOF / io.ErrUnexpectedEOF still classify through
+	// the typed errors.Is above, and the real wire shape is the wrapped
+	// "unexpected EOF" (uvicorn worker-kill, 2026-11-23), so "unexpected
+	// EOF" stays as the substring form for untyped wrappers.
 	msg := err.Error()
 	for _, marker := range []string{
 		"stream read failed",
 		"failed to read response",
 		"request failed: Post", // dial/round-trip wrapper (Go http client)
-		"EOF",
+		"unexpected EOF",
 		"connection reset",
 		"broken pipe",
 	} {
@@ -3601,6 +3607,16 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 			if retryState == nil || !retryState.isResume || deltasSent >= retryState.deltasSent {
 				if err := onDelta(delta); err != nil {
 					resp.Body.Close()
+					// Bughunt M2: this exit is the only doStreamRequest
+					// error path that used to skip savePartialState, so
+					// the transient lane's duplication guard saw zero
+					// delivered deltas and re-dialed a callback abort
+					// whose message happened to carry a transport marker
+					// (a TTSR rule condition containing "EOF"), re-emitting
+					// every already-delivered delta. Mirror the scanner.Err
+					// / ctx error exits: save what was delivered BEFORE
+					// returning so the guard sees the partial state.
+					savePartialState()
 					// S3-9 FIX: body is now closed; don't return resp.
 					return nil, 0, err
 				}

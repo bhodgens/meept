@@ -737,3 +737,257 @@ func TestStreamLane_StaleStateBlocksButFreshAttemptStateRedialed(t *testing.T) {
 		t.Fatalf("fresh-state lane dialed %d times, want 3 (budget re-armed on fresh state — L4)", calls.Load())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bughunt 2026-11-27 fix-wave F5 pins (M2 + L9 + L10).
+// ---------------------------------------------------------------------------
+
+// ttsrAbortServer serves one content delta then keeps the connection
+// open (streaming context); the ABORT comes from the callback itself —
+// the exact wrappedOnDelta shape (loop.go): the TTSR rule condition is
+// user-authored and here contains "EOF", so pre-fix the abort error's
+// message classified transient through the bare "EOF" marker AND the
+// duplication guard saw zero saved deltas (the onDelta exit skipped
+// savePartialState), so the lane RE-DIALED and re-emitted the prefix.
+func ttsrAbortServer(hits *atomic.Int32) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunk := func(o map[string]any) {
+			b, _ := json.Marshal(o)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"role": "assistant"}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"content": "partial "}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"content": "more"}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}}})
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}
+}
+
+// TestStreamLane_TTSRAbortAfterDeltaNotRedialed (M2): a mid-stream TTSR
+// abort (onDelta error) must (a) never re-dial — the duplication guard
+// must see the saved partial state — and (b) never be retried — the abort
+// is NonRetryable. Driven through the REAL ChatWithDeltaCallback lane
+// over httptest, with the abort injected via the callback exactly as the
+// agent loop's wrappedOnDelta does it.
+func TestStreamLane_TTSRAbortAfterDeltaNotRedialed(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(ttsrAbortServer(&hits))
+	defer srv.Close()
+
+	cfg := &ModelConfig{
+		ModelID:          "m",
+		BaseURL:          srv.URL,
+		APIKey:           "k",
+		MaxTokens:        64,
+		TransientRetries: 3,
+	}
+	c := NewClient(cfg)
+	var got strings.Builder
+	var err error
+	_, err = c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(d string) error {
+			got.WriteString(d)
+			if strings.Contains(got.String(), "partial") {
+				// The wrappedOnDelta shape: rule condition containing EOF.
+				return &StreamAbortedError{RuleName: "heredoc-guard", Reason: `pattern "\bEOF\b" matched in delta`}
+			}
+			return nil
+		})
+	if err == nil {
+		t.Fatal("TTSR abort must surface")
+	}
+	var sabort *StreamAbortedError
+	if !errors.As(err, &sabort) {
+		t.Fatalf("err = %v, want *StreamAbortedError", err)
+	}
+	if hits := hits.Load(); hits != 1 {
+		t.Fatalf("provider hit %d times, want exactly 1 (duplication guard must see the saved partial state AND the abort must be NonRetryable — M2)", hits)
+	}
+	if got.String() != "partial " {
+		t.Fatalf("deltas = %q, want exactly the one delivered prefix (no re-emission)", got.String())
+	}
+}
+
+// TestStreamLane_CallerErrorWithTransportMarkerAfterDeltaNotRedialed
+// (M2, save half): a CALLER-side onDelta error (not a TTSR abort — any
+// consumer failure, e.g. a dead WS connection) whose message happens to
+// carry a transport marker must never re-dial once a delta was
+// delivered. This shape is NOT covered by the StreamAbortedError
+// NonRetryable guard: the error is an arbitrary caller error, so the
+// duplication guard's saved partial state (savePartialState on the
+// onDelta exit) is the ONLY thing blocking the re-dial.
+func TestStreamLane_CallerErrorWithTransportMarkerAfterDeltaNotRedialed(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(ttsrAbortServer(&hits))
+	defer srv.Close()
+
+	cfg := &ModelConfig{
+		ModelID:          "m",
+		BaseURL:          srv.URL,
+		APIKey:           "k",
+		MaxTokens:        64,
+		TransientRetries: 3,
+	}
+	c := NewClient(cfg)
+	var got strings.Builder
+	callerErr := errors.New("consumer write failed: broken pipe")
+	_, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(d string) error {
+			got.WriteString(d)
+			if strings.Contains(got.String(), "partial") {
+				return callerErr
+			}
+			return nil
+		})
+	if !errors.Is(err, callerErr) {
+		t.Fatalf("err = %v, want the caller error", err)
+	}
+	if hits := hits.Load(); hits != 1 {
+		t.Fatalf("provider hit %d times, want exactly 1 (the saved partial state must block the re-dial — M2 save half)", hits)
+	}
+	if got.String() != "partial " {
+		t.Fatalf("deltas = %q, want exactly the one delivered prefix", got.String())
+	}
+}
+
+// TestStreamLane_TTSRAbortIsNotRetriedAsTransport pins the NonRetryable()
+// declaration directly at the lane's classification seam.
+func TestStreamLane_TTSRAbortIsNotRetriedAsTransport(t *testing.T) {
+	abort := &StreamAbortedError{RuleName: "r", Reason: `pattern "\bEOF\b" matched in delta`}
+	if isTransientTransportError(abort) {
+		t.Fatal("StreamAbortedError carrying an EOF substring classified transient (M2: NonRetryable guard missing)")
+	}
+	if !abort.NonRetryable() {
+		t.Fatal("StreamAbortedError must declare NonRetryable (M2)")
+	}
+	var target NonRetryableError
+	if !errors.As(abort, &target) || !target.NonRetryable() {
+		t.Fatal("errors.As must reach the NonRetryable declaration through the concrete error")
+	}
+}
+
+// TestTransientTransportError_StreamAbortedErrorNeverTransient (L9): the
+// classification table pin for the narrowed substring list.
+func TestTransientTransportError_StreamAbortedErrorNeverTransient(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		// L9: the bare 3-char "EOF" marker no longer matches any untyped
+		// message; the real wire shape is the wrapped "unexpected EOF".
+		{"untyped EOF-only message", errors.New("read TCP: EOF"), false},
+		{"untyped unexpected EOF", errors.New("stream read failed: unexpected EOF"), true},
+		{"wrapped unexpected EOF", &ClientError{Message: "stream read failed", Cause: errors.New("unexpected EOF")}, true},
+		{"typed io.EOF still transient", io.EOF, true},
+		{"typed io.ErrUnexpectedEOF still transient", io.ErrUnexpectedEOF, true},
+		{"ttsr abort with EOF condition", &StreamAbortedError{RuleName: "g", Reason: `pattern "\bEOF\b" matched`}, false},
+		{"random untyped error", errors.New("context mojo EOF vibes"), false},
+	}
+	for _, tc := range cases {
+		if got := isTransientTransportError(tc.err); got != tc.want {
+			t.Errorf("%s: isTransientTransportError(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
+}
+
+// preResponseKillHandler kills the connection BEFORE any HTTP response
+// for the first killCount requests (the "worker killed before answering"
+// shape — the lane's founding incident), then streams a proper SSE
+// answer (ChatWithDeltaCallback consumes SSE, not the JSON body).
+func preResponseKillHandler(kills *atomic.Int32, killCount int32, content string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		n := kills.Add(1)
+		if n <= killCount {
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", 500)
+				return
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			_ = conn.Close() // die BEFORE answering: EOF, no status
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunk := func(o map[string]any) {
+			b, _ := json.Marshal(o)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"role": "assistant"}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"content": content}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}}})
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}
+}
+
+// TestChatWithDeltaCallback_PreResponseDeathWritesMetricsRow (L10): a
+// streaming transport death BEFORE the response headers must write the
+// failure-shaped provider_requests row (previously dark; M3's mirror
+// covers only the mid-body scanner.Err branch).
+func TestChatWithDeltaCallback_PreResponseDeathWritesMetricsRow(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(preResponseKillHandler(&hits, 2, "hello"))
+	defer srv.Close()
+
+	store, err := newTestMetricsStore(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := &ModelConfig{
+		ProviderID:       "p",
+		ModelID:          "m",
+		BaseURL:          srv.URL,
+		APIKey:           "k",
+		MaxTokens:        64,
+		TransientRetries: 2,
+	}
+	c := NewClient(cfg, WithMetricsStore(store))
+	resp, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("lane must absorb the pre-response deaths and succeed: %v", err)
+	}
+	if resp == nil || resp.Content != "hello" {
+		t.Fatalf("content = %+v, want the recovered answer", resp)
+	}
+	if hits.Load() != 3 {
+		t.Fatalf("provider hit %d times, want 3 (two deaths + one recovery)", hits.Load())
+	}
+
+	// Exactly one failure-shaped row per dead dial: 2 deaths -> 2 error
+	// rows, plus the recovery's success row -> RequestCount 3.
+	// Record() is async; poll the row counts up.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if rerr := store.RefreshStats(context.Background()); rerr != nil {
+			t.Fatalf("RefreshStats: %v", rerr)
+		}
+		stats, serr := store.GetStats(context.Background(), "p", "m", 1)
+		if serr != nil {
+			t.Fatalf("GetStats: %v", serr)
+		}
+		if stats != nil && stats.RequestCount == 3 && stats.ErrorCount == 2 {
+			return // the pre-response deaths each ledgered a failure row
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("pre-response stream deaths did not write failure metrics rows (L10)")
+}
