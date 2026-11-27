@@ -461,7 +461,7 @@ func TestRenderCallRelay(t *testing.T) {
 		{Role: "user", Text: "  hello there  "},
 		{Role: "assistant", Text: "hi"},
 	}
-	got := renderCallRelay(rec, lines, "hangup")
+	got := renderCallRelayWithLookup(rec, lines, "hangup", nil, nil)
 	if !strings.Contains(got, "local leg") || !strings.Contains(got, "caller: hello there") || !strings.Contains(got, "reply: hi") {
 		t.Errorf("renderCallRelay = %q", got)
 	}
@@ -472,7 +472,7 @@ func TestRenderCallRelay(t *testing.T) {
 	for range 5 {
 		many = append(many, voice.TranscriptLine{Role: "user", Text: long})
 	}
-	capped := renderCallRelay(rec, many, "hangup")
+	capped := renderCallRelayWithLookup(rec, many, "hangup", nil, nil)
 	if len(capped) > len("call ended (hangup): employee emp-9 | local leg | incoming | local:desk\n")+relayTranscriptBudget+16 {
 		t.Errorf("relay not capped: %d chars", len(capped))
 	}
@@ -481,7 +481,7 @@ func TestRenderCallRelay(t *testing.T) {
 	}
 
 	// Whitespace-only transcript notifies nothing.
-	if got := renderCallRelay(rec, []voice.TranscriptLine{{Role: "user", Text: "   "}}, "hangup"); got != "" {
+	if got := renderCallRelayWithLookup(rec, []voice.TranscriptLine{{Role: "user", Text: "   "}}, "hangup", nil, nil); got != "" {
 		t.Errorf("whitespace-only transcript rendered %q; want empty", got)
 	}
 }

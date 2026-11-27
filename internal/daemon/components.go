@@ -7638,6 +7638,17 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Info("Telegram bot stopped")
 	}
 
+	// Wait for the Slack channel's in-flight publish goroutines to drain
+	// (SlackChannel.Wait) before teardown proceeds. The notifier posts
+	// permission cards on a per-call goroutine guarded by an internal
+	// WaitGroup; without this join, a shutdown racing an in-flight
+	// chat.postMessage/chat.update could post to a torn-down client.
+	// Nil on every Slack-disabled boot (wireSlackChannel leaves it unset).
+	if c.SlackChannel != nil {
+		c.SlackChannel.Wait()
+		c.Logger.Info("Slack channel in-flight posts drained")
+	}
+
 	// Stop peer sync puller before closing its gossip DB handle (which
 	// happens when the DualStore closes below). Stop() also cleans up
 	// temp files used during merge operations.

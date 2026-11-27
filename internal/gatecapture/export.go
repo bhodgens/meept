@@ -1,6 +1,7 @@
 package gatecapture
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -90,9 +91,7 @@ func formatBand(score float64) string {
 	// Nearest band label on the 0.1 grid.
 	band := int(score*10 + 0.5)
 	whole, frac := band/10, band%10
-	return []string{"0.0", "0.1", "0.2", "0.3", "0.4", "0.5",
-		"0.6", "0.7", "0.8", "0.9", "1.0"}[whole][0:1] + "." +
-		string(rune('0'+frac))
+	return fmt.Sprintf("%d.%d", whole, frac)
 }
 
 // NearMissPrefixLen is the frozen near-miss prefix rule (Contract C5, C6):

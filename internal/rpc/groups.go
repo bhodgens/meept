@@ -175,6 +175,9 @@ func NewGroupsHandler(
 // Components.Start registers the later tools, so prefer
 // SetKnownToolsProvider for the daemon wiring path.
 func (h *GroupsHandler) SetToolValidation(knownTools map[string]struct{}, normalize func(string) string) {
+	if h == nil {
+		return
+	}
 	h.knownTools = knownTools
 	h.normalize = normalize
 }

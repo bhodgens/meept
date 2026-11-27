@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -181,10 +182,16 @@ func (s *Server) handleActivityFindings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Parse resolved boolean (optional)
+	// Parse resolved boolean (optional). ParseBool accepts "1"/"true"/
+	// "t"/"0"/"false"/"f" (case-insensitive); anything else is a 400,
+	// matching how the other params reject malformed values.
 	var resolved *bool
 	if resolvedParam != "" {
-		b := resolvedParam == "true"
+		b, err := strconv.ParseBool(resolvedParam)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		resolved = &b
 	}
 

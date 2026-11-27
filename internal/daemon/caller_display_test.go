@@ -307,7 +307,7 @@ func TestRenderCallRelayHeaderFreeOfRawNumber(t *testing.T) {
 		{Role: "assistant", Text: "got it"},
 	}
 
-	got := renderCallRelay(rec, lines, "hangup")
+	got := renderCallRelayWithLookup(rec, lines, "hangup", nil, nil)
 	if got == "" {
 		t.Fatalf("renderCallRelay rendered nothing")
 	}
@@ -337,7 +337,7 @@ func TestRenderCallRelayLocalLegHeaderStillDigitFree(t *testing.T) {
 	// behaviour, pinned so leaf 02 does not regress the leg word).
 	rec := voice.CallRecord{CallID: "cc-relay-2", Number: "local:desk", EmployeeID: "emp-9", Direction: "incoming"}
 	lines := []voice.TranscriptLine{{Role: "user", Text: "hello"}}
-	got := renderCallRelay(rec, lines, "hangup")
+	got := renderCallRelayWithLookup(rec, lines, "hangup", nil, nil)
 	if !strings.Contains(got, "local leg") {
 		t.Errorf("local-leg relay lost the leg word: %q", got)
 	}
