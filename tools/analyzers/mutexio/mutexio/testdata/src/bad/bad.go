@@ -8,16 +8,54 @@ import (
 
 type fakeClient struct{}
 
-func (fakeClient) Do()        {}
-func (fakeClient) Chat()      {}
-func (fakeClient) Publish()   {}
-func (fakeClient) Save()      {}
-func (fakeClient) Close()     {}
-func (*fakeClient) Load()     {}
-func (*fakeClient) Persist()  {}
+func (fakeClient) Do()       {}
+func (fakeClient) Chat()     {}
+func (fakeClient) Publish()  {}
+func (fakeClient) Save()     {}
+func (fakeClient) Close()    {}
+func (*fakeClient) Load()    {}
+func (*fakeClient) Persist() {}
 
 var fc fakeClient
 var fcp *fakeClient
+
+// saveConfigAtomic is the sink fixture (FQN "bad.saveConfigAtomic" in
+// sinkFuncs): a plain FUNCTION — not a method — whose body funnels into
+// os.* I/O. Its name carries no I/O signal, so it is only catchable
+// through the analyzer's sink-function table, which resolves both this
+// plain-ident callee shape (the exact internal/rpc spelling) and the
+// package-qualified selector shape (sinkprobe/pkg fixture) via types.
+func saveConfigAtomic(path string, data []byte) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		if cerr := f.Close(); cerr != nil { //nolint:nilseam // testdata fixture: cleanup error shadowed by the write error
+			return cerr
+		}
+		return err
+	}
+	return f.Close()
+}
+
+// violationSinkFuncDirectUnlock: calling the project-local sink wrapper
+// between Lock and Unlock should flag via the sink table (M8/D-2).
+func violationSinkFuncDirectUnlock() {
+	var mu sync.Mutex
+	mu.Lock()
+	saveConfigAtomic("/tmp/cfg", []byte("y")) // want `mutexio: saveConfigAtomic called while holding a mutex`
+	mu.Unlock()
+}
+
+// violationSinkFuncDeferUnlock: same, with the deferred-unlock shape the
+// real bughunt site used (M8/D-2: applyPolicyBinding's old defer + save).
+func violationSinkFuncDeferUnlock() {
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+	saveConfigAtomic("/tmp/cfg", []byte("y")) // want `mutexio: saveConfigAtomic called while holding a mutex`
+}
 
 // violationDirectUnlock: I/O between Lock and Unlock should flag.
 func violationDirectUnlock() {
@@ -40,7 +78,7 @@ func violationMultiple() {
 	var mu sync.Mutex
 	mu.Lock()
 	defer mu.Unlock()
-	fc.Publish()      // want `mutexio: Publish called while holding a mutex`
+	fc.Publish()                              // want `mutexio: Publish called while holding a mutex`
 	os.WriteFile("/tmp/x", []byte("y"), 0644) // want `mutexio: WriteFile called while holding a mutex`
 }
 
@@ -66,7 +104,7 @@ func okReceiverIsMutex() {
 	var mu sync.Mutex
 	mu.Lock()
 	defer mu.Unlock()
-	_ = mu
+	//lint:faillint mu intentionally unused after the deferred unlock
 }
 
 // violationRWMutex: works on sync.RWMutex too.

@@ -133,6 +133,34 @@ var ioMethods = map[string]bool{
 	"Wait":            true, // exec.Cmd.Wait() / process wait
 }
 
+// sinkFuncs maps fully-qualified function names (package.ImportPath . +
+// func name) of project-local persistence WRAPPERS to their I/O class.
+// These functions perform I/O in their bodies (they funnel into os.*
+// sinks) but their NAMES carry no I/O signal, so the name-based ioMethods
+// table alone is blind to them: a caller holding a mutex across e.g.
+// saveConfigAtomic was previously invisible to the analyzer even though
+// the call does CreateTemp/Write/Close/Chmod/Rename under the lock.
+//
+// The analyzer resolves a plain function call's callee to its
+// fully-qualified name via types and flags it when the sink function is
+// called inside a lock range. Additive table only — a wrong or stale
+// entry simply stops matching (no false positives possible from this
+// table; entries here are sinks, not exemptions).
+//
+// Table entries are the FIXTURE twins (sinkprobe/pkg.SaveConfigAtomic /
+// .AtomicWrite), which the unit tests exercise; the production sinks
+// they mirror are internal/rpc/reasoning.go's saveConfigAtomic and
+// atomicWrite (the meept.json5 atomic persist path; bughunt 2026-11-27
+// M8/D-2). When a new project-local I/O wrapper appears, add its
+// fully-qualified name here and extend the fixtures.
+var sinkFuncs = map[string]bool{
+	"bad.saveConfigAtomic":            true, // bad fixture (testdata/src/bad), plain-ident callee shape
+	"sinkprobe/pkg.SaveConfigAtomic":  true, // GOPATH-style fixture (testdata/src/sinkprobe/pkg), qualified-callee shape
+	"sinkprobe/pkg.AtomicWrite":       true,
+	"sinkprobe2/pkg.SaveConfigAtomic": true, // manual-probe fixture (out-of-tree; kept for the probe workflow)
+	"sinkprobe2/pkg.AtomicWrite":      true,
+}
+
 func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
@@ -341,10 +369,55 @@ func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *
 		}
 		sel, ok := ce.Fun.(*ast.SelectorExpr)
 		if !ok {
+			// Not a method call: check the project-local SINK FUNCTION
+			// table (M8/D-2) — plain calls like saveConfigAtomic(path,
+			// cfg) whose bodies funnel into os.* I/O but whose names
+			// carry no I/O signal. Both plain idents (saveConfigAtomic)
+			// and package-qualified idents (pkg.SaveConfigAtomic) are
+			// resolved via types to the callee's fully-qualified name;
+			// an unresolvable callee is skipped.
+			var sinkIdent *ast.Ident
+			switch fun := ce.Fun.(type) {
+			case *ast.Ident:
+				sinkIdent = fun
+			case *ast.SelectorExpr:
+				sinkIdent = fun.Sel
+			}
+			if sinkIdent != nil {
+				if obj := pass.TypesInfo.ObjectOf(sinkIdent); obj != nil {
+					if fn, ok := obj.(*types.Func); ok && fn.Pkg() != nil {
+						if sinkFuncs[fn.Pkg().Path()+"."+fn.Name()] {
+							if isNoLintMutexIO(ce, nolintLines, fset) {
+								return true
+							}
+							pass.Reportf(ce.Pos(), "mutexio: %s called while holding a mutex (CLAUDE.md mutex scope rule)", sinkIdent.Name)
+						}
+					}
+				}
+			}
 			return true
 		}
 		method := sel.Sel.Name
 		if !ioMethods[method] {
+			// SINK TABLE (M8/D-2): a selector callee may be a
+			// package-qualified plain FUNCTION (pkg.SaveConfigAtomic)
+			// whose name carries no I/O signal but whose body performs
+			// I/O. Resolve via types; only RECEIVER-LESS functions
+			// (package-level, never methods) are consulted, and a
+			// non-table callee falls through silently.
+			if obj := pass.TypesInfo.ObjectOf(sel.Sel); obj != nil {
+				if fn, ok := obj.(*types.Func); ok && fn.Pkg() != nil && funcHasNoReceiver(fn) {
+					if sinkFuncs[fn.Pkg().Path()+"."+fn.Name()] {
+						if deferCalls[ce] {
+							return true
+						}
+						if isNoLintMutexIO(ce, nolintLines, fset) {
+							return true
+						}
+						pass.Reportf(ce.Pos(), "mutexio: %s called while holding a mutex (CLAUDE.md mutex scope rule)", method)
+					}
+				}
+			}
 			return true
 		}
 		// Skip if the receiver is the mutex itself (e.g., the unlock
@@ -381,6 +454,14 @@ func checkRange(pass *analysis.Pass, body *ast.BlockStmt, lockCall, unlockCall *
 		pass.Reportf(ce.Pos(), "mutexio: %s called while holding a mutex (CLAUDE.md mutex scope rule)", method)
 		return true
 	})
+}
+
+// funcHasNoReceiver reports whether fn is a package-level function (no
+// method receiver). Sink-table entries are plain functions; a same-named
+// METHOD on some type must never match the table.
+func funcHasNoReceiver(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	return ok && sig.Recv() == nil
 }
 
 // isNoLintMutexIO reports whether any line spanned by the given call
