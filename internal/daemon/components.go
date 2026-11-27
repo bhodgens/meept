@@ -6304,7 +6304,15 @@ func (c *Components) Start(ctx context.Context) error {
 		// its stop func on the component.
 		c.workingTierFlushSetup(ctx)
 		startedHandlers = append(startedHandlers, "working_tier_flush")
-		c.Logger.Info("working-tier eviction flush started (tiers disabled)")
+		// D-3 log truth: StartWorkingTierFlush returns nil without arming
+		// any goroutine when the episodic store is absent — logging
+		// "started" there would be false. Only the non-nil stop func is a
+		// real start; otherwise the setup was a no-op and we say so.
+		if c.workingTierFlushStop != nil {
+			c.Logger.Info("working-tier eviction flush started (tiers disabled)")
+		} else {
+			c.Logger.Info("working-tier eviction flush not armed (no episodic store)")
+		}
 	}
 
 	// Voice sidecar Start (leaf 14): text server up + voice_call tool
