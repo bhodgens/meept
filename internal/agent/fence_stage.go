@@ -160,6 +160,18 @@ func composeLoopFence(base *security.PermissionChecker, factory sessionFenceFact
 	return clone
 }
 
+// ComposeSessionFence is the exported daemon-side arm point of
+// composeLoopFence (issue #137): the step-job lane (AgentJobProcessor)
+// arms the per-task worktree jail on its task-scoped loops here, because
+// the session-loop seam (dispatcher/handler) never runs for queued step
+// jobs. Same semantics as composeLoopFence: the session jail is the
+// resolved step working dir, the group fs_roots stay additive, a nil
+// factory or empty root leaves the base checker untouched (byte-
+// identical legacy posture).
+func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool) security.FenceStage, rootPath string, noFence bool, res *groups.Resolved) *security.PermissionChecker {
+	return composeLoopFence(base, factory, rootPath, noFence, res)
+}
+
 // GroupFenceStage is a FenceStage that checks a path/command against EVERY
 // root in its list and denies when NO root accepts it (agent-groups leaf
 // 04, F6): the group policy's fs_roots are ADDITIVE fence roots — the

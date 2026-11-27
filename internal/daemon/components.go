@@ -5258,6 +5258,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
+	// Issue #137: the step-job lane arms the same #138 session jail as the
+	// chat/dispatch lanes (three-site rule → four: the step loops are what
+	// the bench regression tasks run on). Same mint, same gate.
+	if cfg.Security.FenceEnabled {
+		jobFenceAllowRead := cfg.Security.FenceAllowRead
+		jobProc.WithSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+			return agent.NewSessionFenceStage(rootPath, jobFenceAllowRead, noFence, logger)
+		})
+	}
 	// Wire the job processor to the bus. Use the msgBus PARAMETER, not
 	// c.msgBus: the field is only stored at Start-time wiring (line ~5483),
 	// long after this site, so the field-guard here always saw nil in
@@ -11077,6 +11086,15 @@ type AgentJobProcessor struct {
 	// session precedence. Nil = phase worktrees never participate (all
 	// pre-leaf-04 behavior).
 	orchestrator *agent.Orchestrator
+	// fenceFactory (issue #137, via WithSessionFenceFactory) mints the
+	// per-session fence stage carrying the #138 path jail. The step-job
+	// lane previously armed ONLY the additive group fence, so a task-
+	// scoped step loop (the bench lane) wrote anywhere the daemon-wide
+	// allowed_paths globs reached — a hallucinated $RIG/repo path sailed
+	// through while the intended narrow jail is the per-task worktree.
+	// Nil (default/tests) leaves the pre-#137 group-only posture byte-
+	// identical.
+	fenceFactory func(rootPath string, noFence bool) security.FenceStage
 	// bus carries job-level quota surfacing (leaf 06): step jobs that fail
 	// terminal on a provider quota block publish the EXISTING agent.quota_wait
 	// event so the user hears the real cause. Nil (the default for processors
@@ -11137,6 +11155,15 @@ func (p *AgentJobProcessor) WithSessionStore(ss session.Store) *AgentJobProcesso
 // sessions when resolving the working directory.
 func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 	p.taskStore = ts
+	return p
+}
+
+// WithSessionFenceFactory wires the #137 step-job fence arm (issue #137):
+// the same mint the ChatHandler/Dispatcher sites receive (the daemon
+// routes it through agent.NewSessionFenceStage so the #138 jail engages).
+// Nil keeps the group-only posture.
+func (p *AgentJobProcessor) WithSessionFenceFactory(f func(rootPath string, noFence bool) security.FenceStage) *AgentJobProcessor {
+	p.fenceFactory = f
 	return p
 }
 
@@ -11535,8 +11562,11 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 				// multiuser identity the memory tools stamp/filter with —
 				// task-scoped loops would otherwise stay scope-blind while
 				// session loops are filtered (three-site rule).
+				// (#137: hoisted out of the inner block — the fence arm
+				// below reads the session's per-session --nofence flag.)
+				var sess *session.Session
 				if p.sessionStore != nil && stepPayload.SessionID != "" {
-					sess := p.sessionStore.Get(stepPayload.SessionID)
+					sess = p.sessionStore.Get(stepPayload.SessionID)
 					if sess == nil {
 						sess = p.sessionStore.GetByConversationID(stepPayload.SessionID)
 					}
@@ -11545,15 +11575,27 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 						loop.SetScopeUserID(sess.OwnerID)
 					}
 				}
-				// Group fence roots (agent-groups leaf 04 F6): a managed
-				// agent's fs_roots arm an ADDITIVE fence on this loop —
-				// writes outside the group roots are denied at the
-				// central FenceStage, even when the daemon-wide session
-				// fence is off (fence_enabled=false). The step-job lane
-				// has NO session-scoped injection site (the session loop
-				// seam is dispatcher/handler), so this is the fence arm
-				// point for task-scoped loops.
-				if gf := agent.InjectGroupFence(loop.Security(), loop.GroupResolution()); gf != nil && gf != loop.Security() {
+				// Session path jail (issue #137) + group fence roots
+				// (agent-groups leaf 04 F6): the step-job lane is the
+				// bench/step lane the #137 transcripts ran on, and it
+				// previously armed ONLY the additive group fence, so a
+				// hallucinated path inside the daemon-wide allowed_paths
+				// glob (e.g. $RIG/repo instead of the per-task worktree)
+				// was written silently. ComposeSessionFence arms the
+				// #138 jail rooted at the resolved per-task worktree
+				// (in-jail short-circuits, out-of-jail refused even when
+				// the glob admits) AND keeps the group fs_roots additive
+				// (D1). nil factory (tests, fence disabled) falls back to
+				// the exact pre-#137 group-only posture.
+				var stepNoFence bool
+				if sess != nil {
+					stepNoFence = sess.NoFence
+				}
+				gf := agent.ComposeSessionFence(loop.Security(), p.fenceFactory, wd, stepNoFence, loop.GroupResolution())
+				if gf == nil {
+					gf = agent.InjectGroupFence(loop.Security(), loop.GroupResolution())
+				}
+				if gf != nil && gf != loop.Security() {
 					loop.SetSecurityChecker(gf)
 				}
 				p.logger.Info("Step job working dir resolved",
@@ -11600,6 +11642,17 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 					if sess != nil {
 						scoped.SetProjectID(sess.ProjectID)
 						scoped.SetScopeUserID(sess.OwnerID)
+					}
+					// Issue #137: the fallback scoped loop carries the
+					// same per-task worktree jail as the GetForTask
+					// branch — it runs the step's tools, so it must be
+					// fenced to the same root.
+					var noFence bool
+					if sess != nil {
+						noFence = sess.NoFence
+					}
+					if gf := agent.ComposeSessionFence(scoped.Security(), p.fenceFactory, wd, noFence, scoped.GroupResolution()); gf != nil && gf != scoped.Security() {
+						scoped.SetSecurityChecker(gf)
 					}
 				}
 				defer scoped.Close()

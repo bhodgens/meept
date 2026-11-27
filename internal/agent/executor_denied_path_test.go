@@ -157,3 +157,51 @@ func TestDeniedPathResolvesRelative(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckPermission_ResolvesRelativeAgainstTurnDir pins issue #137's
+// mechanism-1 code shape at the permission seam: the path the CHECKER
+// judges must be the path the TOOL writes. pkg/security resolves a
+// relative arg with filepath.Abs against the DAEMON PROCESS CWD (the test
+// binary's dir here), while the filesystem tools resolve it against the
+// turn's session working dir (tools.WorkingDirFromContext, injected by
+// AgentLoop.executeToolCalls — the same root resolvePath joins onto).
+// Before this fix a model's relative write was fenced against one root
+// and executed in another — the check-vs-write divergence the rig
+// transcripts show (success flag, artifact in the wrong tree).
+//
+// Fixture: the checker admits only ONE directory tree (a temp dir). A
+// relative "secret.txt" with that temp dir as the turn dir must be
+// ALLOWED (it resolves into the admitted tree — exactly where the tool
+// will write it). With NO turn dir bound the same call falls back to the
+// legacy process-CWD resolution (the repo dir is not under the admitted
+// tree) and DENIES — the two lanes differ ONLY by the injected dir,
+// pinning the join itself (and proving the pin non-vacuous: pre-fix, the
+// first case resolved against the process CWD and denied).
+func TestCheckPermission_ResolvesRelativeAgainstTurnDir(t *testing.T) {
+	tmpTurn := t.TempDir()
+	capture := &decisionLogHandler{}
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("file_write", "Write file", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"message": "write complete"}, nil
+	}))
+	checker := security.NewPermissionChecker(security.Config{AllowedPaths: []string{tmpTurn + "/**"}})
+	e := NewExecutor(registry, checker, WithExecutorLogger(slog.New(capture)))
+
+	res := e.Execute(tools.ContextWithWorkingDir(context.Background(), tmpTurn), llm.ToolCall{
+		ID: "call_parity1", Type: "function",
+		Function: llm.ToolCallFunction{Name: "file_write", Arguments: `{"path": "secret.txt", "content": "x"}`},
+	})
+	if !res.Success {
+		t.Fatalf("relative write inside the turn dir (under the admitted /tmp tree) denied: %v — the checker judged a path resolved against the process CWD, not the tool's write target", res.Error)
+	}
+
+	// Control: same call, NO turn dir -> the legacy process-CWD resolution
+	// (the test package dir is not under /tmp) denies.
+	res2 := e.Execute(context.Background(), llm.ToolCall{
+		ID: "call_parity2", Type: "function",
+		Function: llm.ToolCallFunction{Name: "file_write", Arguments: `{"path": "secret.txt", "content": "x"}`},
+	})
+	if res2.Success {
+		t.Fatal("relative write with no turn dir allowed: the control must deny under the process-CWD resolution so the parity pin is non-vacuous")
+	}
+}
