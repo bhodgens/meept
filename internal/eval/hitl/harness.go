@@ -461,6 +461,13 @@ type Runner struct {
 // DriveTimeout expiry ends the run WITHOUT a terminal event: the attempt
 // stays attempted-but-never-completed and the completion rate reads the
 // gap honestly (no fabricated terminal).
+//
+// The loop is bounded by BOTH the clock deadline and a max-poll iteration
+// cap (maxPolls). The cap guards against a frozen clock (the test seam
+// cfg.Clock may return the same instant forever, e.g. a clock that never
+// advances) which would otherwise loop forever even though the deadline
+// check passes. When the iteration cap is hit, Drive returns with the same
+// result shape as a timeout (no terminal event).
 func (r *Runner) Drive(cfg RunConfig) *RunResult {
 	sc := cfg.Scenario.WithDefaults()
 	clock := cfg.Clock
@@ -476,6 +483,19 @@ func (r *Runner) Drive(cfg RunConfig) *RunResult {
 		budget = 120 * time.Second
 	}
 
+	// maxPolls bounds the loop when the clock does not advance (frozen test
+	// clock). Derive from budget/poll so a slow poll never reduces the cap
+	// below the budget in wall-clock terms, but floor at a small constant so
+	// a very short poll doesn't explode the cap.
+	var maxPolls int
+	if poll > 0 {
+		maxPolls = int(budget / poll)
+	}
+	const minMaxPolls = 1000
+	if maxPolls < minMaxPolls {
+		maxPolls = minMaxPolls
+	}
+
 	res := &RunResult{
 		ScenarioID: sc.ID,
 		Regime:     cfg.Regime.String(),
@@ -486,8 +506,14 @@ func (r *Runner) Drive(cfg RunConfig) *RunResult {
 	seenReq := map[string]bool{}
 	seenPlan := map[string]bool{}
 
-	for {
+	for polls := 0; ; polls++ {
 		if clock().After(deadline) {
+			return res
+		}
+		// Bounded against a frozen clock: if the clock never advances,
+		// the deadline check never fires and the loop spins. Cap the
+		// iterations.
+		if polls >= maxPolls {
 			return res
 		}
 		if cfg.Perms != nil {
@@ -519,7 +545,9 @@ func (r *Runner) Drive(cfg RunConfig) *RunResult {
 // take the scripted verdict, resolve, record the decision. Resolve
 // failures record reason "resolve_error" (the stream stays honest; the
 // next poll retries the list). Pending list errors are transient and
-// retried on the next tick.
+// retried on the next tick. A failed Resolve leaves the request un-seen so
+// the next poll retries it (a transient resolve error must not be treated
+// as a final verdict).
 func (r *Runner) pollPermissions(cfg RunConfig, res *RunResult, seen map[string]bool, clock func() time.Time) {
 	pending, err := cfg.Perms.Pending()
 	if err != nil {
@@ -529,6 +557,7 @@ func (r *Runner) pollPermissions(cfg RunConfig, res *RunResult, seen map[string]
 		if seen[p.ID] {
 			continue
 		}
+		// Record the request event (once per id).
 		seen[p.ID] = true
 		res.Events = append(res.Events, TimelineEvent{
 			At:        clock(),
@@ -546,6 +575,8 @@ func (r *Runner) pollPermissions(cfg RunConfig, res *RunResult, seen map[string]
 		reason := "answered"
 		if err := cfg.Perms.Resolve(p.ID, decision); err != nil {
 			reason = "resolve_error"
+			// Unmark seen so the next poll retries the same permission id.
+			delete(seen, p.ID)
 		}
 		res.Events = append(res.Events, TimelineEvent{
 			At:        clock(),

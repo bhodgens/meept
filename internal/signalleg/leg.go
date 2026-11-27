@@ -914,6 +914,7 @@ func (l *Leg) Accept(ctx context.Context, callEvent signal.CallEvent, employeeID
 // fan-out, which onEnded (or the wiring's hangup path) fires. Double End
 // is idempotent (nil); a foreign id is ErrUnknownSignalCall.
 func (l *Leg) End(ccid string) error {
+	var callID string
 	l.mu.Lock()
 	st, ok := l.calls[ccid]
 	if ok {
@@ -927,6 +928,14 @@ func (l *Leg) End(ccid string) error {
 			st.ringWatchdogTimer.Stop()
 			st.ringWatchdogTimer = nil
 		}
+		// Snapshot the call id under the lock. Place stores st.callID under
+		// l.mu only after StartCall succeeds; an unlocked read here (the
+		// old code) could observe "" for a call that has already been
+		// connected-and-completed, which would abandon a reservation that
+		// Place has already completed. The snapshot is taken under the lock
+		// so the abandon decision uses the value at the moment End reaped
+		// the call, not a value Place may have written later.
+		callID = st.callID
 	}
 	l.mu.Unlock()
 	if !ok {
@@ -939,9 +948,9 @@ func (l *Leg) End(ccid string) error {
 	}
 	// An outbound reservation whose call ended BEFORE its StartCall
 	// completed is abandoned here (a connected-and-completed call keeps
-	// its Complete from Place). st.callID == "" means StartCall never
+	// its Complete from Place). callID == "" means StartCall never
 	// landed on this state.
-	if st.effectKey != "" && l.deps.Effects != nil && st.callID == "" {
+	if st.effectKey != "" && l.deps.Effects != nil && callID == "" {
 		actx, cancel := context.WithTimeout(context.Background(), abandonTimeout)
 		if err := l.deps.Effects.Abandon(actx, st.effectKey, st.employee, "call ended before connect"); err != nil {
 			l.log.Debug("signalleg: effect abandon", "ccid", ccid, "err", err)
