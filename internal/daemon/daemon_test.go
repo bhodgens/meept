@@ -344,10 +344,24 @@ func TestRPCLoadTest(t *testing.T) {
 		go func(_ int) {
 			defer wg.Done()
 
-			conn, err := net.Dial("unix", cfg.SocketPath)
-			if err != nil {
-				failCount.Add(int64(numRequests / concurrency))
-				return
+			// Stat success is not listen success. net.Listen creates
+			// the socket file at bind, then calls listen. A dial in
+			// that gap gets "connection refused". The full suite hits
+			// this gap; a single dial does not. Retry until the
+			// listener accepts or the deadline passes.
+			dialDeadline := time.Now().Add(2 * time.Second)
+			var conn net.Conn
+			var err error
+			for {
+				conn, err = net.Dial("unix", cfg.SocketPath)
+				if err == nil {
+					break
+				}
+				if time.Now().After(dialDeadline) {
+					failCount.Add(int64(numRequests / concurrency))
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 			defer conn.Close()
 
