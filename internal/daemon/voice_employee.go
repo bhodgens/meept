@@ -1205,24 +1205,6 @@ func (w *VoiceEmployeeWiring) notifyCallRelay(ccid string, outcome voice.Outcome
 	w.logger.Debug("voice call relay published", "ccid", ccid, "session_id", rec.SessionID)
 }
 
-// renderCallRelay builds the notification text: a one-line header
-// (outcome, employee, leg, direction, caller display) followed by the
-// transcript as "caller: ..." / "reply: ..." lines. Returns "" (notify
-// nothing) when the transcript carries no rendered content. The leg
-// derives from the stored target ("local:<label>" is the local leg;
-// everything else is the phone leg) because the registry instance is
-// already released when the relay runs.
-//
-// DISCLOSURE RULE (contact-display master O1/O4, leaf 02 §5): the header
-// is an EGRESS surface. It NEVER embeds the raw stored number — the phone
-// leg shows the boundary-resolved display form (name or "Unknown caller"
-// plus the masked last-4 tail; the local leg keeps its digit-free
-// "local:<label>" target verbatim). The transcript BODY is untouched:
-// spoken digits inside conversation lines stay verbatim.
-func renderCallRelay(rec voice.CallRecord, lines []voice.TranscriptLine, outcome string) string {
-	return renderCallRelayWithLookup(rec, lines, outcome, nil, nil)
-}
-
 // renderCallRelayWithLookup is renderCallRelay with the contact-display
 // resolver seam: a non-nil lookup resolves rec.Number to the Display form
 // for the header; nil (or an unresolvable number) renders the

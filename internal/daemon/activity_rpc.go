@@ -248,6 +248,19 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 		if err != nil {
 			return nil, fmt.Errorf("activity.findings: %w", err)
 		}
+		// total comes from the store's exact COUNT, not len(findings):
+		// ListAuditFindings is capped at the store's default 100 rows,
+		// so len() under-reports large fleets (bughunt 2026-11-19 wave 4,
+		// same class as agents.roster's findings_count). CountAuditFindings
+		// runs the same WHERE clause with no row cap.
+		total, countErr := mgr.CountAuditFindings(ctx, employee.AuditQuery{
+			EmployeeID: req.EmployeeID,
+			Severity:   req.Severity,
+			Since:      -time.Until(since),
+		})
+		if countErr != nil {
+			return nil, fmt.Errorf("activity.findings: %w", countErr)
+		}
 		// Since post-filter: ListAuditFindings expresses the cutoff as a
 		// window duration and skips it entirely when the resulting window
 		// is not positive (a future `since` is unrepresentable there), so
@@ -271,10 +284,28 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 			}
 			findings = filtered
 		}
-		total := len(findings)
+		// The store count reflects (employee, severity, since-window) but not
+		// the handler's post-filters. A resolved filter (the store count has
+		// no resolved column) or a future since (the store skips the window
+		// when it isn't positive, so it over-includes) means the store count
+		// no longer matches the filtered view; fall back to the post-filtered
+		// list length there (exact below the store's 100-row cap; above it the
+		// store can't express the filter, so it's an approximation - see
+		// open questions). Otherwise the store count is the exact, unbounded
+		// total (the ListAuditFindings 100-row cap is what made
+		// len(findings) under-report).
+		if req.HasResolved || (!since.IsZero() && !since.Before(time.Now().UTC())) {
+			total = len(findings)
+		}
 		if req.Offset > 0 || req.Limit > 0 {
-			start := min(req.Offset, total)
-			end := total
+			// Slice bounds come from the window we actually HOLD, never
+			// from total: the store caps ListAuditFindings at 100 rows
+			// while total now counts the whole fleet, so findings[...:total]
+			// would panic above the cap (offset beyond the window yields an
+			// empty page — paging deeper than the store's cap needs store
+			// plumbing, see open questions).
+			start := min(req.Offset, len(findings))
+			end := len(findings)
 			if req.Limit > 0 && start+req.Limit < end {
 				end = start + req.Limit
 			}

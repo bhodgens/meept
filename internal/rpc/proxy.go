@@ -132,6 +132,9 @@ func (p *ProxyHandler) SetSubmitHandler(h *SubmitHandler) {
 // the four groups.* methods register through the handler's nil-safe
 // construction. Nil-guarded per the setter convention.
 func (p *ProxyHandler) SetGroupsHandler(h *GroupsHandler) {
+	if p == nil {
+		return
+	}
 	if h != nil {
 		p.groupsHandler = h
 	}

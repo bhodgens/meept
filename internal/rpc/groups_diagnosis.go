@@ -38,6 +38,9 @@ type DiagnosisService interface {
 // per the setter convention; nil makes both groups.explain and
 // groups.check answer a descriptive error (no legacy explain fallback).
 func (h *GroupsHandler) SetDiagnosisService(svc DiagnosisService) {
+	if h == nil {
+		return
+	}
 	if svc != nil {
 		h.checkSvc = svc
 	}
@@ -51,6 +54,9 @@ func (h *GroupsHandler) SetDiagnosisService(svc DiagnosisService) {
 // Nil-guarded per the setter convention; nil keeps the check-time
 // "reader not wired" note.
 func (h *GroupsHandler) SetOverridesLoader(loader func() (groups.OverridesReader, error)) {
+	if h == nil {
+		return
+	}
 	if loader != nil {
 		h.overridesLoader = loader
 	}
