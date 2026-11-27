@@ -930,6 +930,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			components.AgentLoop.SetTaskCollector(taskColl)
 			logger.Info("Task collector wired into agent loop")
 		}
+		// Per-section prompt telemetry (issue #193): rides the same
+		// Record(name, value, tags) sink as the metrics store.
+		components.AgentLoop.SetPromptSectionRecorder(metricsStore)
 		respAnalyzer := metrics.NewResponseAnalyzer()
 		components.AgentLoop.SetResponseAnalyzer(respAnalyzer)
 		logger.Info("Response analyzer wired into agent loop")

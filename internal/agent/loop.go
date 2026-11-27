@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -644,6 +645,12 @@ type AgentConfig struct {
 	// sections are hoisted before volatile ones via AssembleOrdered and
 	// LastStablePrefixHash() is updated on every build.
 	StablePrefixDisabled bool
+	// AgentsContextWholeTree restores the pre-#193 ambient AGENTS.md
+	// behavior: a whole-tree LoadAllAgentsMD walk instead of the default
+	// root -> workingDir chain scoping. Zero value (false) = chain-scoped.
+	// Escape hatch for audits that genuinely need every package's
+	// invariant doc in every turn's prompt.
+	AgentsContextWholeTree bool
 	// OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
 	// the anchor's JSON evidence-format TEMPLATE is dropped (the prose
 	// rules stay) for employees with no file/tool that produces evidence.
@@ -1300,6 +1307,13 @@ type AgentLoop struct {
 	taskCollector    *metrics.TaskCollector
 	responseAnalyzer *metrics.ResponseAnalyzer
 	retryMetrics     *RetryMetrics
+
+	// promptSectionRecorder is the per-section prompt telemetry sink
+	// (issue #193): one Record(name, value, tags) point per section per
+	// assembly. Same narrow interface ACPExecutor rides for
+	// acp.persona.turns; *metrics.Store satisfies it. Nil = telemetry
+	// dark, prompt path unaffected.
+	promptSectionRecorder TurnMetricRecorder
 
 	// Compression pipeline for prompt compression (CCR-based)
 	compressionPipeline *compress.Pipeline
@@ -8847,11 +8861,15 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 		l.logger.Debug("project info not resolved", "working_dir", workingDir)
 	}
 
-	// Load AGENTS.md context for project conventions and symbol references
+	// Load AGENTS.md context for project conventions and symbol references.
+	// Issue #193: chain-scoped (root -> workingDir ancestors only) and routed
+	// through the builder's dedicated agents-context component (Stable:false,
+	// so the cacheable stable prefix never moves) instead of a generic custom
+	// section — the section is named "agents-context" in telemetry.
 	if workingDir != "" {
 		agentsCtx := l.loadAgentsContext(workingDir)
 		if agentsCtx != "" {
-			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
+			builder.WithAgentsContext(agentsCtx)
 		}
 	}
 }
@@ -10139,6 +10157,13 @@ func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
 
 	prompt, hash := builder.BuildSystemPromptOrdered(!l.config.StablePrefixDisabled)
 
+	// Per-section prompt telemetry (issue #193): one datapoint per non-empty
+	// section per assembly, tagged with the section name and cache-stability,
+	// so ambient-context growth (the monolithic AGENTS.md/skills sections) is
+	// measurable in metrics.db before any allocator wires budgets to it.
+	// Emission is debug-gated on the recorder path: nil recorder = dark.
+	l.recordPromptSections(builder)
+
 	l.mu.Lock()
 	prev := l.lastStablePrefixHash
 	l.lastStablePrefixHash = hash
@@ -10162,6 +10187,82 @@ func (l *AgentLoop) LastStablePrefixHash() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.lastStablePrefixHash
+}
+
+// PromptSectionBytesMetric is the per-section system-prompt size gauge
+// (issue #193). Tags: section (the PromptSection name, e.g.
+// "agents-context", "custom-Skills-N"), stable ("true"/"false"),
+// turn (loop turn counter), session_id. One point per non-empty section
+// per assembly; the value is the section body's byte length.
+const PromptSectionBytesMetric = "agent.prompt_section.bytes"
+
+// recordPromptSections emits the per-section size telemetry for one
+// assembly (issue #193, docs/workflows/context-firewall.md observability).
+// Dark unless a recorder is wired or debug logging is enabled; a recorder
+// failure can never fail a turn, so Record errors are swallowed inside
+// metrics.Store already.
+func (l *AgentLoop) recordPromptSections(builder *PromptBuilder) {
+	l.mu.RLock()
+	recorder := l.promptSectionRecorder
+	l.mu.RUnlock()
+	debug := l.logger.Enabled(context.Background(), slog.LevelDebug)
+	if recorder == nil && !debug {
+		return
+	}
+	sections := builder.classifySections()
+	if recorder == nil {
+		// Debug lane only: carry turn + section + bytes so the ambient
+		// composition is inspectable from daemon logs without metrics.db.
+		turn := l.turnCounter.Load()
+		for _, s := range sections {
+			if s.Body == "" {
+				continue
+			}
+			l.logger.Debug("prompt section",
+				"stage", "prompt_assembly",
+				"session_id", l.sessionID,
+				"turn", turn,
+				"section", s.Name,
+				"stable", s.Stable,
+				"bytes", len(s.Body),
+			)
+		}
+		return
+	}
+	turn := strconv.FormatInt(l.turnCounter.Load(), 10)
+	for _, s := range sections {
+		if s.Body == "" {
+			continue
+		}
+		recorder.Record(PromptSectionBytesMetric, float64(len(s.Body)), map[string]string{
+			"section":    s.Name,
+			"stable":     strconv.FormatBool(s.Stable),
+			"turn":       turn,
+			"session_id": l.sessionID,
+		})
+	}
+}
+
+// WithPromptSectionRecorder wires the per-section prompt telemetry sink
+// (issue #193). Nil-safe per the Set*/option convention.
+func WithPromptSectionRecorder(rec TurnMetricRecorder) LoopOption {
+	return func(l *AgentLoop) {
+		if rec != nil {
+			l.promptSectionRecorder = rec
+		}
+	}
+}
+
+// SetPromptSectionRecorder wires the per-section prompt telemetry sink after
+// loop creation (the daemon builds metrics.Store after the template loop;
+// SetTaskCollector precedent). Nil-guarded.
+func (l *AgentLoop) SetPromptSectionRecorder(rec TurnMetricRecorder) {
+	if l == nil || rec == nil {
+		return
+	}
+	l.mu.Lock()
+	l.promptSectionRecorder = rec
+	l.mu.Unlock()
 }
 
 // publishAction publishes an agent action event.
@@ -10740,6 +10841,7 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// --- Metrics ---
 		WithTaskCollector(l.taskCollector),
 		WithResponseAnalyzer(l.responseAnalyzer),
+		WithPromptSectionRecorder(l.promptSectionRecorder),
 		WithCompressionPipeline(l.compressionPipeline),
 		WithAgentReasoning(l.agentReasoning),
 
@@ -11356,15 +11458,38 @@ func (l *AgentLoop) SetBeforeToolCallHook(name string, priority HookPriority, ho
 	l.hookRegistry.RegisterBeforeToolCall(name, priority, hook)
 }
 
-// loadAgentsContext loads AGENTS.md and related project convention context
-// from the given working directory and all subdirectories.
+// loadAgentsContext loads AGENTS.md project-convention context scoped to the
+// session's working directory (issue #193): the root -> workingDir ancestor
+// chain only, NOT a whole-tree walk. Deep-package invariant docs in sibling or
+// sub-directories no longer ride the ambient prompt of a session working
+// elsewhere; the project-root conventions and every directory on the chain to
+// cwd still do. The joined output is capped at maxAgentsContextBytes,
+// matching the ArtifactManager.LoadAgentsContext precedent.
 // Returns empty string if no context found.
 func (l *AgentLoop) loadAgentsContext(workingDir string) string {
 	if workingDir == "" {
 		return ""
 	}
 
-	agentsFiles, err := project.LoadAllAgentsMD(workingDir)
+	// Escape hatch (opt-in): the pre-#193 whole-tree walk, for audits that
+	// need every package's invariant doc on every turn. Keeps
+	// project.LoadAllAgentsMD wired on a production path.
+	if l.config.AgentsContextWholeTree {
+		return joinAgentsMD(project.LoadAllAgentsMD(workingDir))
+	}
+
+	// Resolve the project root once (git toplevel walk-up, cheap stat loop).
+	// Without a real repo marker FindProjectRoot returns workingDir itself,
+	// which degrades safely to "root file + ancestors within cwd".
+	projectRoot := project.FindProjectRoot(workingDir)
+	agentsFiles, err := project.LoadAgentsMDChain(projectRoot, workingDir)
+	return joinAgentsMD(agentsFiles, err)
+}
+
+// joinAgentsMD renders loaded AGENTS.md files root-to-leaf under the shared
+// 8KB ambient cap (maxAgentsContextBytes, ArtifactManager.LoadAgentsContext
+// precedent).
+func joinAgentsMD(agentsFiles []project.AgentsMD, err error) string {
 	if err != nil || len(agentsFiles) == 0 {
 		return ""
 	}
@@ -11379,7 +11504,12 @@ func (l *AgentLoop) loadAgentsContext(workingDir string) string {
 		sb.WriteString(af.Content)
 		sb.WriteString("\n\n")
 	}
-	return sb.String()
+	result := sb.String()
+	if len(result) > maxAgentsContextBytes {
+		result = truncateAtNewline(result, maxAgentsContextBytes)
+		result += "\n\n[... AGENTS.md context truncated at 8KB ...]"
+	}
+	return result
 }
 
 // skillDiscoveryThreshold returns the configured skill discovery confidence threshold.

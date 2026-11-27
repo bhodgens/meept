@@ -82,8 +82,64 @@ func LoadAgentsMDForPath(projectRoot, filePath string) ([]AgentsMD, error) {
 	return results, nil
 }
 
+// FindProjectRoot walks up from startDir looking for the nearest directory
+// that marks a project root (a ".git" entry — directory for a normal repo,
+// file for a worktree). When no marker is found, startDir itself is returned
+// so callers always get a usable (conservative) root: the chain then covers
+// just startDir, never the whole filesystem.
+func FindProjectRoot(startDir string) string {
+	if startDir == "" {
+		return ""
+	}
+	current := filepath.Clean(startDir)
+	for {
+		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Reached the filesystem root without finding a marker.
+			return filepath.Clean(startDir)
+		}
+		current = parent
+	}
+}
+
+// LoadAgentsMDChain returns the AGENTS.md files along the directory chain
+// from projectRoot down to dir (inclusive), ordered root-to-leaf. This is the
+// ambient-context scoping for issue #193: a session working in dir gets the
+// root conventions plus every ancestor-directory invariant doc, and NOTHING
+// from sibling or deeper packages. dir outside projectRoot yields only the
+// files on the shared chain (root-to-common-ancestor); an empty dir yields
+// only the root file when present.
+//
+// RelPath is normalised to "" for the project root (unlike
+// LoadAgentsMDForPath, which reports the raw filepath.Rel value ".").
+func LoadAgentsMDChain(projectRoot, dir string) ([]AgentsMD, error) {
+	if projectRoot == "" || dir == "" {
+		return nil, nil
+	}
+	// LoadAgentsMDForPath keys off filepath.Dir(filePath); join a sentinel
+	// filename so the walk starts AT dir.
+	loaded, err := LoadAgentsMDForPath(projectRoot, filepath.Join(filepath.Clean(dir), "AGENTS.md"))
+	if err != nil {
+		return nil, err
+	}
+	for i := range loaded {
+		if loaded[i].RelPath == "." {
+			loaded[i].RelPath = ""
+		}
+	}
+	return loaded, nil
+}
+
 // LoadAllAgentsMD walks the entire projectRoot tree and returns ALL AGENTS.md
 // files found at any depth, ordered root-to-leaf (breadth-first among siblings).
+//
+// Issue #193: ambient per-turn injection defaults to LoadAgentsMDChain (root
+// -> cwd ancestors only); this whole-tree loader now serves only the explicit
+// AgentConfig.AgentsContextWholeTree escape hatch and full-audit callers —
+// do not use it for per-turn ambient context.
 func LoadAllAgentsMD(projectRoot string) ([]AgentsMD, error) {
 	if projectRoot == "" {
 		return nil, nil

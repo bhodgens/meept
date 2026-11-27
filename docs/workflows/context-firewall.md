@@ -114,9 +114,22 @@ When `compaction.enabled` is true and utilization exceeds `trigger_ratio`, the `
 - Summarization success rate
 - Message drop frequency
 - Average compression quality score
+- Per-section system-prompt size (`agent.prompt_section.bytes` in
+  `metrics.db` `metrics_live`, issue #193): one point per non-empty prompt
+  section per assembly, tagged `section` (e.g. `agents-context`,
+  `custom-<title>-N`), `stable`, `turn`, `session_id`; value is the section
+  body's byte length. Emitted by `AgentLoop.recordPromptSections`
+  (internal/agent/loop.go) whenever a recorder is wired (daemon wires
+  `metrics.Store`; session clones inherit via `ConfigSnapshot`).
+- Ambient AGENTS.md injection is chain-scoped (project root -> session
+  working dir, 8KB cap, issue #193); `AgentConfig.AgentsContextWholeTree`
+  restores the legacy whole-tree walk as an explicit escape hatch.
 
 ### Debug Info
-- Current context composition
+- Current context composition — at debug level the loop logs one
+  `prompt section` line per section per assembly
+  (`stage=prompt_assembly`, `turn`, `section`, `stable`, `bytes`), the
+  no-metrics.db lane of the same #193 telemetry.
 - Compaction summary content and cumulative file operations
 - Compressor stage reached
 - Summarization model status
