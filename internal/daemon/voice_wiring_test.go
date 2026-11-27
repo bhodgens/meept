@@ -797,9 +797,9 @@ func TestPhoneHoldReleaseMarksEnded(t *testing.T) {
 		t.Fatalf("outbound row state = %q, want live", got)
 	}
 	w.Manager.FailOutcome(res.CallControlID, voice.OutcomeHangup, "test hangup")
-	if got := phoneCallState(t, dbPath, res.CallControlID); got != "ended" {
-		t.Fatalf("outbound row state = %q, want ended", got)
-	}
+	// Same async-release fan-out as the inbound leg (A4-2): the ended
+	// write lands off the caller goroutine - poll, don't race.
+	awaitPhoneRowState(t, dbPath, res.CallControlID, "ended")
 	w.Manager.FailOutcome(res.CallControlID, voice.OutcomeHangup, "second hangup")
 	if got := phoneCallState(t, dbPath, res.CallControlID); got != "ended" {
 		t.Fatalf("second outbound release changed state to %q", got)
