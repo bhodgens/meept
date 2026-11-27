@@ -203,6 +203,128 @@ func TestErrOptedOutIsCheckable(t *testing.T) {
 	}
 }
 
+// TestSetMessagingOptOutIsColumnScoped pins the #158 fix: the consent
+// toggle writes ONLY messaging_opt_out (+ updated_at). Two-writer
+// posture:
+//  1. SetMessagingOptOut(true) after an owner display_name edit keeps
+//     the edit (the toggle never round-trips a whole record), and bumps
+//     updated_at.
+//  2. SetMessagingOptOut(false) clears the flag the same way.
+//  3. A stale full-record Put of a pre-toggle copy DOES revert the flag
+//     — documented second-wins upsert behavior (contact/store.go Put),
+//     pinned here so the semantics stay explicit; the consent path no
+//     longer rides that path itself.
+//  4. Unknown phone is ErrUnknownContact (no ghost row), invalid phone
+//     is ErrInvalidPhone.
+func TestSetMessagingOptOutIsColumnScoped(t *testing.T) {
+	ctx := context.Background()
+	s, err := NewStore(filepath.Join(t.TempDir(), "contacts.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.Put(ctx, Record{ID: "c-atomic", DisplayName: "Original", Phone: optOutPhone(21)}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	// Stale pre-toggle copy captured BEFORE any consent write (the
+	// second writer in the #158 interleaving).
+	stale, err := s.GetByPhone(ctx, optOutPhone(21))
+	if err != nil {
+		t.Fatalf("GetByPhone: %v", err)
+	}
+	staleBefore := stale
+	stale.UpdatedAt = staleBefore.CreatedAt // a caller-provided stale timestamp
+
+	// Owner edits another column through the full-record path.
+	stale.DisplayName = "Owner edit"
+	if err := s.Put(ctx, stale); err != nil {
+		t.Fatalf("owner Put (display_name edit): %v", err)
+	}
+	before, err := s.Get(ctx, "c-atomic")
+	if err != nil {
+		t.Fatalf("Get before toggle: %v", err)
+	}
+	if before.UpdatedAt.Before(staleBefore.CreatedAt) {
+		t.Fatalf("owner edit did not bump updated_at: %+v", before)
+	}
+
+	// (1) Toggle SET: the consent flag flips, every other column —
+	// including the owner's display_name edit — survives untouched.
+	if err := s.SetMessagingOptOut(ctx, optOutPhone(21), true); err != nil {
+		t.Fatalf("SetMessagingOptOut(true): %v", err)
+	}
+	after, err := s.Get(ctx, "c-atomic")
+	if err != nil {
+		t.Fatalf("Get after toggle: %v", err)
+	}
+	if !after.MessagingOptOut {
+		t.Fatal("SetMessagingOptOut(true) did not set the flag")
+	}
+	if after.DisplayName != "Owner edit" {
+		t.Fatalf("toggle clobbered display_name = %q, want %q (column-scoped write must not round-trip the record)",
+			after.DisplayName, "Owner edit")
+	}
+	if after.ID != before.ID || !after.CreatedAt.Equal(before.CreatedAt) || len(after.Policy) != len(before.Policy) ||
+		after.SignalUUID != before.SignalUUID || after.VoiceApproved != before.VoiceApproved {
+		t.Fatalf("toggle changed non-consent columns: before %+v after %+v", before, after)
+	}
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("updated_at = %v after toggle, want later than %v (toggle must bump it)", after.UpdatedAt, before.UpdatedAt)
+	}
+
+	// (2) Toggle CLEAR: same column-scoped behavior on the START leg.
+	if err := s.SetMessagingOptOut(ctx, "5550000021", false); err != nil {
+		t.Fatalf("SetMessagingOptOut(false) (dial-shape, must normalize): %v", err)
+	}
+	cleared, err := s.Get(ctx, "c-atomic")
+	if err != nil {
+		t.Fatalf("Get after clear: %v", err)
+	}
+	if cleared.MessagingOptOut {
+		t.Fatal("SetMessagingOptOut(false) did not clear the flag")
+	}
+	if cleared.DisplayName != "Owner edit" {
+		t.Fatalf("clear toggle clobbered display_name = %q", cleared.DisplayName)
+	}
+
+	// (3) Documented second-wins: a stale full-record Put with
+	// MessagingOptOut=false still reverts a set flag — the PUT is
+	// unchanged by #158; only the consent PATH stopped round-tripping.
+	if err := s.SetMessagingOptOut(ctx, optOutPhone(21), true); err != nil {
+		t.Fatalf("SetMessagingOptOut(true) again: %v", err)
+	}
+	staleCopy := staleBefore // MessagingOptOut=false, pre-toggle snapshot
+	if err := s.Put(ctx, staleCopy); err != nil {
+		t.Fatalf("stale Put: %v", err)
+	}
+	reverted, err := s.Get(ctx, "c-atomic")
+	if err != nil {
+		t.Fatalf("Get after stale Put: %v", err)
+	}
+	if reverted.MessagingOptOut {
+		t.Fatal("stale full-record Put did NOT revert the flag: Put's all-column ON CONFLICT write is broken")
+	}
+
+	// (4) Posture pins: unknown phone and invalid phone.
+	if err := s.SetMessagingOptOut(ctx, optOutPhone(99), true); !errors.Is(err, ErrUnknownContact) {
+		t.Fatalf("SetMessagingOptOut unknown phone err = %v, want ErrUnknownContact", err)
+	}
+	if _, found, _ := s.LookupByPhone(ctx, optOutPhone(99)); found {
+		t.Fatal("SetMessagingOptOut created a ghost row for an unknown phone")
+	}
+	if err := s.SetMessagingOptOut(ctx, "not-a-phone", true); !errors.Is(err, ErrInvalidPhone) {
+		t.Fatalf("SetMessagingOptOut invalid phone err = %v, want ErrInvalidPhone", err)
+	}
+}
+
+// TestStoreInterfaceHasSetMessagingOptOut is a compile-time pin: the
+// contact.Store contract carries the #158 toggle, so any alternate
+// implementation must provide the column-scoped path too.
+var _ interface {
+	SetMessagingOptOut(ctx context.Context, phone string, opted bool) error
+} = (Store)(nil)
+
 // optedOutAttempt is a stub adapter that refuses like the migrated
 // telnyx_sms channel: (OutcomeUnavailable, ErrOptedOut-wrapped) with
 // zero sends.

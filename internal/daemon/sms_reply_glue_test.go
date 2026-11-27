@@ -55,8 +55,8 @@ package daemon
 //
 // Behavioral contract asserted below:
 //   - ReplyStop   -> Contacts: record exists => MessagingOptOut SET via
-//     read-modify-Put (second-wins upsert, contact/store.go:221-258);
-//     unknown number => NO record created, but the courtesy confirmation
+//     the column-scoped SetMessagingOptOut toggle (#158 — no full-record
+//     Put round-trip); unknown number => NO record created, but the courtesy confirmation
 //     STILL sends (02-glue task 1). Confirmation dedupe: a second STOP
 //     from a contact that is already opted out sends NOTHING new.
 //   - ReplyStart  -> record exists => MessagingOptOut CLEARED + start
