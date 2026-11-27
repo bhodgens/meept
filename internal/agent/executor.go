@@ -2326,6 +2326,41 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 		details["working_dir"] = wd
 	}
 
+	// Bughunt 2026-11-27 P1 (conservative branch — creation-time fence):
+	// schedule_create and cron_create persist a shell job that the
+	// scheduler will later execute. The tool-side creation fence
+	// (tool_schedule_create.go fenceChecker) is inert — per-tool
+	// SetFenceChecker wiring was retired (agent-groups leaf 01 T3) and
+	// never re-wired for the provider-registered scheduler tools — and
+	// the execution-time guard's fence phase is nil in the daemon
+	// (components.go builds the shared guard with a nil FenceChecker),
+	// so a shell command was never path-judged anywhere. Fix the half
+	// this lane owns: inject the tool-resolved working_dir into details
+	// (same resolveShellWorkingDir semantics as the shell arm above) and
+	// let the permissions fence stage judge schedule_create/cron_create
+	// shell commands through the SAME central seam shell_execute uses.
+	// The execution-time half (threading a fence into
+	// scheduler.JobDependencies at internal/daemon/components.go:5347 and
+	// guard construction at :5361-5366, whose fence func is nil) needs
+	// internal/daemon + internal/scheduler edits and is OUT OF SCOPE for
+	// this lane; documented in
+	// .hermes/audits/2026-11-27-fixwave/F2-fence-shell.md.
+	if (toolName == "schedule_create" || toolName == "cron_create" || toolName == "job_start") && wd != "" {
+		resolved := wd // absent arg: the tool runs the job in the session dir
+		if raw := details["working_dir"]; raw != "" {
+			if strings.HasPrefix(raw, "~") {
+				if home, err := os.UserHomeDir(); err == nil {
+					raw = filepath.Join(home, raw[1:])
+				}
+			}
+			if !filepath.IsAbs(raw) {
+				raw = filepath.Join(wd, raw)
+			}
+			resolved = raw
+		}
+		details["working_dir"] = resolved
+	}
+
 	// Inject the tool name so the pre-exec checker (employee constitution
 	// gate) can match against tools_allowed / tools_forbidden entries that
 	// use tool names rather than action categories. The PreExecChecker

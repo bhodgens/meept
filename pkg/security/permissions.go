@@ -772,6 +772,33 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 			} else if cmd := details["command"]; cmd != "" {
 				fenceErr = fence.CheckCommand(cmd, jobDir)
 			}
+		case "task_write":
+			// Bughunt 2026-11-27 P1 (creation-time fence): schedule_create
+			// and cron_create persist a shell job the scheduler executes
+			// later — the same /bin/sh -c surface as job_start — but their
+			// tool-side creation fence is inert (per-tool wiring retired,
+			// agent-groups leaf 01 T3) and the daemon's execution-time
+			// guard carries a nil fence phase, so the shell command was
+			// never path-judged anywhere. Key on the injected tool_name so
+			// plain task_write calls stay byte-identical; the executor
+			// injects the tool-resolved working_dir (or the turn dir when
+			// the arg is absent). cron_create's shell case carries no
+			// working_dir key from the model — the injected turn dir is
+			// what the fence judges. Does NOT cover the execution-time
+			// half (internal/scheduler + internal/daemon guard wiring;
+			// out of this lane's scope).
+			tool := details["tool_name"]
+			if tool == "schedule_create" || tool == "cron_create" {
+				jobDir := details["working_dir"]
+				if jobDir == "" {
+					jobDir = "."
+				}
+				if err := fence.CheckPath(jobDir, "exec"); err != nil {
+					fenceErr = err
+				} else if cmd := details["command"]; cmd != "" {
+					fenceErr = fence.CheckCommand(cmd, jobDir)
+				}
+			}
 		}
 		// bughunt F8 (same class as the job_start case above): the git
 		// family (git_validate -> file_read, git_overview -> file_read,
