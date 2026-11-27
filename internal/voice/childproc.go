@@ -45,7 +45,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -301,6 +300,13 @@ func (p *ChildProc) EnsureRunning(ctx context.Context) error {
 		// The child died underneath us: drop the stale handle and respawn.
 		p.rp = nil
 		p.state = stateStopped
+		// A draining child carries a possibly-armed idle timer. Without
+		// stopping it, the timer (armed by NoteCallEnd) would keep firing
+		// after the respawn and kill the NEW child early. The running
+		// branch above calls stopIdleTimerLocked; the dead-child fallthrough
+		// must do the same so the orphaned timer cannot stop the respawned
+		// child.
+		p.stopIdleTimerLocked()
 		fallthrough
 	case stateStopped:
 		p.state = stateStarting
@@ -515,10 +521,17 @@ func newStartToken() (string, error) {
 // shortStopCtx bounds a cleanup stop. The returned context carries its own
 // timeout and must NOT be cancelled by the caller: llm.RuntimeProcess.Stop
 // treats ctx.Done as "escalate to SIGKILL", so a cleanup stop that outlives
-// its grace window self-escalates when the deadline passes.
+// its grace window self-escalates when the deadline passes. The context is
+// returned as-is; context.WithTimeout's own timer cancels at the grace
+// deadline (no finalizer). A finalizer on the local box would be armed on a
+// copy that callers receive by value, so the box could become unreachable and
+// the GC could run cancel() at any time — causing a premature ctx.Done and
+// an early SIGKILL escalation instead of honoring the grace.
 func shortStopCtx(grace time.Duration) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), grace)
-	runtime.SetFinalizer(&ctx, func(p *context.Context) { cancel() })
+	// Releasing the timer's resources on completion without handing the
+	// caller a second cancel path (the old finalizer was exactly that).
+	context.AfterFunc(ctx, cancel)
 	return ctx
 }
 

@@ -368,15 +368,52 @@ func supervisorPrompt(sentence string) string {
 			"Sentence: %q", sentence)
 }
 
-// parseAllowed tolerantly reads ALLOW/DENY prefixes; anything else denies
-// (fail-closed).
+// parseAllowed reads a standalone ALLOW verdict (fail-closed). The
+// supervisor prompt asks for exactly one line: "ALLOW" or "DENY: <reason>".
+// A reply allows only when it is exactly "ALLOW" (case-insensitive, trimmed)
+// or "ALLOW:" followed by a reason that carries no deny marker (NOT, DENY,
+// DENIED, or a standalone NO). This closes the fail-open prefix match:
+// "ALLOWED? NO", "ALLOW all access", and "ALLOW." all start with the "ALLOW"
+// prefix but are not a valid ALLOW verdict, so they deny.
 func parseAllowed(reply string) bool {
-	switch {
-	case strings.HasPrefix(strings.ToUpper(strings.TrimSpace(reply)), "ALLOW"):
-		return true
-	default:
+	trimmed := strings.TrimSpace(reply)
+	if trimmed == "" {
 		return false
 	}
+	upper := strings.ToUpper(trimmed)
+	if upper == "ALLOW" {
+		return true
+	}
+	// "ALLOW:" followed by a reason (the prompt allows "ALLOW: <reason>").
+	if !strings.HasPrefix(upper, "ALLOW:") {
+		return false
+	}
+	reason := upper[len("ALLOW:"):]
+	return !hasDenyMarker(reason)
+}
+
+// hasDenyMarker reports whether the (upper-cased) clause contains a deny
+// marker: NOT, DENY, DENIED, or a standalone NO (word boundary on both
+// sides).
+func hasDenyMarker(clause string) bool {
+	if strings.Contains(clause, "NOT") ||
+		strings.Contains(clause, "DENY") ||
+		strings.Contains(clause, "DENIED") {
+		return true
+	}
+	return containsWord(clause, "NO")
+}
+
+// containsWord reports whether clause contains w as a whole word (word
+// boundary on both sides; empty clause is false).
+func containsWord(clause, w string) bool {
+	words := strings.Fields(clause)
+	for _, f := range words {
+		if strings.EqualFold(f, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseReason extracts the deny detail for the verdict. Deny and unparseable
@@ -387,7 +424,7 @@ func parseReason(reply string) string {
 		return unparseableReason
 	}
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "ALLOW") {
+	if parseAllowed(trimmed) {
 		return "allow"
 	}
 	if rest, ok := strings.CutPrefix(trimmed, "DENY:"); ok {
