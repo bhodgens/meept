@@ -4101,6 +4101,15 @@ Ops note \(documented, not coded\): application\-to\-person traffic from local n
 	    // is sent on sends; the contact channel derives
 	    // {base}/api/v1/voice/messaging/webhook when set. Zero default.
 	    WebhookBaseURL string `json:"webhook_base_url" toml:"webhook_base_url"`
+	    // FutureSkewSeconds overrides the Telnyx webhook FUTURE-skew window
+	    // for the SMS/messaging webhook route ONLY (issue #159). 0/negative
+	    // inherits voice.future_skew_seconds, which itself inherits the
+	    // 60s package default (telnyx.DefaultSignatureFutureSkewWindow).
+	    // The same Ed25519 verifier serves voice and SMS paths; the knob is
+	    // per-path so a voice-only clock-drift workaround never silently
+	    // loosens the SMS replay bound (or vice versa). Future-skew
+	    // rejections log at WARN with the measured drift.
+	    FutureSkewSeconds int `json:"future_skew_seconds" toml:"future_skew_seconds"`
 	    // StopReply is the confirmation text sent after a STOP/START consent
 	    // keyword (zero default: the reply WORDING defaults live in the sms
 	    // pkg per the master serialization note, not in schema.go).
@@ -4114,11 +4123,12 @@ Ops note \(documented, not coded\): application\-to\-person traffic from local n
 	    // honored (never force-defaulted true at the load boundary).
 	    InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
 	    // AllowedNumbers is the outbound SMS recipient allowlist (E.164).
-	    // EMPTY/NIL = all recipients (backward compatible with pre-#165
-	    // behavior, where any valid E.164 number was accepted); a non-empty
-	    // list permits ONLY exact E.164 matches. The send path
-	    // (telnyx.SendSMS2) refuses an out-of-list recipient before any HTTP
-	    // POST with ErrRecipientNotAllowed.
+	    // EMPTY/NIL = refuse ALL outbound SMS (fail-closed since M14,
+	    // 2026-11-25, matching voice.allowed_numbers parity): list E.164
+	    // recipients to enable sends. A non-empty list permits ONLY exact
+	    // E.164 matches. The send path (telnyx.SendSMS2) refuses an
+	    // out-of-list or unset-list recipient before any HTTP POST with
+	    // ErrRecipientNotAllowed.
 	    AllowedNumbers []string `json:"allowed_numbers" toml:"allowed_numbers"`
 	    // MaxMessagesPerCall bounds how many messages ONE SendSMS2 call may
 	    // dispatch. Unit: MESSAGES PER SEND CALL. 0 = unlimited (backward
@@ -6663,12 +6673,24 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    ReorderWindowFrames int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
 	    ReorderGapMs        int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
 	    TelnyxPublicKey     string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath     string `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr   string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee     string `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg          string `json:"default_leg"            toml:"default_leg"`
-	    TTSModel            string `json:"tts_model"             toml:"tts_model"`
-	    TTSVoice            string `json:"tts_voice"             toml:"tts_voice"`
+	    // FutureSkewSeconds (json future_skew_seconds) overrides the Telnyx
+	    // webhook FUTURE-skew window for the voice call-control and
+	    // media-socket verify paths (issue #159). The shipped default is 60s
+	    // (telnyx.DefaultSignatureFutureSkewWindow); 0/negative inherits it.
+	    // A daemon whose clock runs >window ahead of Telnyx's otherwise
+	    // hard-401s every voice webhook (calls connect, state events stop
+	    // silently). Raise it ONLY to cover measured NTP drift; the window
+	    // bounds replay-harvesting, so the past window stays pinned at 300s.
+	    // Future-skew rejections log at WARN with the measured drift.
+	    // Per-path override for the SMS webhook: voice.messaging.
+	    // future_skew_seconds (row wins for the messaging route only).
+	    FutureSkewSeconds int    `json:"future_skew_seconds" toml:"future_skew_seconds"`
+	    ChildBinaryPath   string `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee   string `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg        string `json:"default_leg"            toml:"default_leg"`
+	    TTSModel          string `json:"tts_model"             toml:"tts_model"`
+	    TTSVoice          string `json:"tts_voice"             toml:"tts_voice"`
 	    // TTSRefAudio (json tts_ref_audio) is the path to the CLONE
 	    // REFERENCE WAV the qwen3 custom voice is keyed on (plan
 	    // 20261113-filler-clips leaf 02). The OpenAI-compatible shim never

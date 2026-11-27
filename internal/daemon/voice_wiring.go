@@ -416,12 +416,34 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Issue #159: per-path future-skew windows. voice.future_skew_seconds
+		// covers the call-control + media-socket paths;
+		// voice.messaging.future_skew_seconds (row > global) covers the SMS
+		// webhook route below. 0/absent = the 60s package default, so a
+		// zero-config boot is byte-identical.
+		voiceFutureSkew := time.Duration(cfg.FutureSkewSeconds) * time.Second
+		smsFutureSkew := voiceFutureSkew
+		if cfg.Messaging.FutureSkewSeconds != 0 {
+			smsFutureSkew = time.Duration(cfg.Messaging.FutureSkewSeconds) * time.Second
+		}
 		verify = commhttp.VerifyFuncs{
 			Webhook: func(body []byte, headers http.Header) error {
-				return telnyx.VerifyWebhookSignature(body, headers, pubKey)
+				return telnyx.VerifyWebhookSignatureWithOptions(body, headers, pubKey, telnyx.VerifyOptions{
+					Path:          telnyx.SkewPathVoiceWebhook,
+					MaxFutureSkew: voiceFutureSkew,
+				})
 			},
 			Media: func(headers http.Header, streamURL string) error {
-				return telnyx.VerifyMediaSocket(headers, streamURL, pubKey)
+				return telnyx.VerifyMediaSocketWithOptions(headers, streamURL, pubKey, telnyx.VerifyOptions{
+					Path:          telnyx.SkewPathMediaSocket,
+					MaxFutureSkew: voiceFutureSkew,
+				})
+			},
+			MessagingWebhook: func(body []byte, headers http.Header) error {
+				return telnyx.VerifyWebhookSignatureWithOptions(body, headers, pubKey, telnyx.VerifyOptions{
+					Path:          telnyx.SkewPathSMSWebhook,
+					MaxFutureSkew: smsFutureSkew,
+				})
 			},
 		}
 	}
@@ -943,7 +965,10 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	if deps.Config.Voice.Messaging.Enabled {
 		armed := deps.Config.Voice.Messaging.InboundEnabled && deps.MessagingStore != nil
 		msgDeps := commhttp.MessagingWebhookDeps{
-			Verify: verify.Webhook,
+			// Issue #159: prefer the messaging-path verifier (its own
+			// future-skew window); falls back to the shared voice
+			// verifier when the daemon wiring built none.
+			Verify: verify.MessagingVerify(),
 		}
 		if armed {
 			consumer := buildMessagingDeps(messagingArmingDeps{
