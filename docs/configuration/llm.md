@@ -346,6 +346,62 @@ max_p95_latency_ms = 30000   # Maximum P95 latency
 fallback_enabled = true      # Enable automatic fallback
 ```
 
+## Semantic Response Cache Configuration (`llm.cache.semantic`)
+
+The semantic tier is a second-chance lookup strictly BEHIND the exact-key
+response cache (`llm.cache`): exact miss -> embed the prompt -> serve the
+closest stored answer when cosine clears the threshold, before the budget
+gate. **Ships ENABLED by default** (owner ruling on audit finding P4,
+2026-11-27; opt-out below). Why default-on is safe: the lookup runs only
+inside the exact-key cache gate (so with the shipped
+`llm.cache.enabled=false` the path never executes), and with no embedder
+configured (empty `embedder_alias`, `memory.embeddings.enabled=false`)
+the daemon logs one Warn and degrades to exact-only — a structurally
+dead cache, never an error, never a boot failure.
+
+```json5
+llm: {
+  cache: {
+    semantic: {
+      enabled: true,           // default TRUE (opt-out: set false)
+      threshold: 0.95,         // cosine floor (R0 research addendum)
+      max_entries: 1024,       // vector store bound (LRU eviction)
+      ttl_min: 0,              // 0 mirrors llm.cache.default_ttl_min
+      embedder_alias: "",      // alias or "provider/model-id"; "" = memory-stack embedder
+      verify_floor: 0          // 0 disables the two-stage verify band
+    }
+  }
+}
+```
+
+Accepted contracts (owner ruling P4):
+
+- **Who may read:** only the chat-completion paths (client.go
+  `semanticLookupBehindMiss`, internal/llm/client.go:536) serve from the
+  tier, and only after the exact-key miss. The context-warm path never
+  writes it (zero-side-effects rule, internal/llm/AGENTS.md).
+- **Who may never be served:** any response carrying tool calls is a
+  hard exemption — never stored (semantic_cache.go:293) and never served
+  (client.go:556, semantic_cache.go:217/:276). The tool call IS the
+  answer; serving one semantically would replace the whole turn with the
+  tool never running.
+- **Verify-floor band:** with `verify_floor` set below `threshold`,
+  candidates scoring in [verify_floor, threshold) get a stage-2 re-embed
+  and direct-cosine check; any failure degrades to a miss. Band selection
+  is deterministic (score desc, key asc). Values at/above threshold clamp
+  to 0 (disabled) at the load boundary.
+- **Degradation:** any embedder failure (boot-time resolution or
+  runtime) falls back to exact-only silently — no error, no parked turn.
+- **Opt-out:** `enabled: false` keeps the tier's code path structurally
+  unreachable (byte-identical responses). An absent key means ON; Load
+  unmarshals onto the default config (turn_watchdog/quota_retry
+  mechanism), pinned by TestSemanticCacheAbsentKeyDefaultsOn and
+  TestSemanticCacheExplicitFalseSurvivesLoad.
+
+Daemon wiring: internal/daemon/semantic_cache_wiring.go. Package
+invariants: internal/llm/AGENTS.md ("Serving tiers, semantic cache, and
+TTFT").
+
 ## Quota Retry Configuration
 
 Behavior when a provider returns a quota/usage-limit error (429 with a

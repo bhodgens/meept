@@ -114,6 +114,32 @@ sweep. The sweep never completes a plan — completion belongs to
 OnTaskCompleted — and plans with live (pending/planning/executing/testing)
 parent tasks are never touched. A COMPLETED parent is also left alone.
 
+## LLM semantic cache is default-on (owner-ruled exception, audit-P4)
+
+`llm.cache.semantic.enabled` flipped from opt-in FALSE to default TRUE
+by the owner ruling on audit finding P4 (ruling 2026-11-27; the audit
+finding, not issue #172 which tracks an unrelated quick-plan symptom).
+This is the deliberate exception to the opt-in doctrine of this document,
+safe because the tier is structurally inert on default installs: exact-
+key response serving gates the semantic lookup (`llm.cache.enabled=false`
+shipped), and with no embedder configured (`memory.embeddings.enabled`
+false, `embedder_alias` empty) the daemon degrades to exact-only with one
+boot Warn and never an error (internal/daemon/semantic_cache_wiring.go,
+buildSemanticCacheTier). Mechanism: Load/LoadJSON5Config unmarshal user
+config ONTO DefaultConfig() (the turn_watchdog/quota_retry precedent) —
+an absent key keeps the seeded true; an explicit `enabled=false` still
+wins on both the JSON5 and TOML paths, pinned by
+TestSemanticCacheExplicitFalseSurvivesLoad and
+TestSemanticCacheAbsentKeyDefaultsOn (internal/config/schema_semantic_test.go).
+Accepted contracts, full text in internal/llm/AGENTS.md ("Serving tiers,
+semantic cache, and TTFT") and docs/configuration/llm.md: read-only for
+chat-completion responses; responses carrying tool calls are NEVER
+stored and NEVER served (guards: internal/llm/client.go:556,
+internal/llm/semantic_cache.go:217/:276/:293); the verify_floor band
+re-verifies sub-threshold candidates and any failure degrades to a miss;
+no embedder = exact-only degradation. Flipping this default back OFF is
+again a product decision, not a code cleanup.
+
 ## Fresh-context critic flags are on by default (disable-form keys)
 
 The three plan-critic features (`fresh_critic_disabled`,
