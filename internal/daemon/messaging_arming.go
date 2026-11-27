@@ -43,8 +43,12 @@ import (
 // messagingUnrestrictedWarning is the exact operator-facing hazard string
 // for issue #165 slice 5. It is a single deterministic Warn at arming time
 // (never per-send): a default-disabled boot never reaches this code, so
-// zero-config startup stays byte-identical.
-const messagingUnrestrictedWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; any E.164 number may be contacted"
+// zero-config startup stays byte-identical. M14 updated the text: an
+// unset allowlist no longer means "any E.164 number may be contacted" —
+// outbound sends are REFUSED fail-closed until allowed_numbers lists
+// recipients (the live construction warning, telnyx.
+// NoRecipientAllowlistWarning, carries the same corrected posture).
+const messagingUnrestrictedWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; sends are refused fail-closed until allowed_numbers lists E.164 recipients"
 
 // messagingWarnOnce makes the warning idempotent per process. The arming
 // path may call warnIfMessagingUnrestricted from more than one site (the

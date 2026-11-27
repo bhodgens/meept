@@ -6429,8 +6429,9 @@ type MessagingConfig struct {
 	// {base}/api/v1/voice/messaging/webhook when set. Zero default.
 	WebhookBaseURL string `json:"webhook_base_url" toml:"webhook_base_url"`
 	// FutureSkewSeconds overrides the Telnyx webhook FUTURE-skew window
-	// for the SMS/messaging webhook route ONLY (issue #159). 0/negative
-	// inherits voice.future_skew_seconds, which itself inherits the
+	// for the SMS/messaging webhook route ONLY (issue #159). 0 or a
+	// NEGATIVE value inherits voice.future_skew_seconds (L17), which
+	// itself inherits the
 	// 60s package default (telnyx.DefaultSignatureFutureSkewWindow).
 	// The same Ed25519 verifier serves voice and SMS paths; the knob is
 	// per-path so a voice-only clock-drift workaround never silently

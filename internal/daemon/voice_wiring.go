@@ -55,6 +55,7 @@ import (
 	"github.com/caimlas/meept/internal/voice"
 	"github.com/caimlas/meept/internal/voice/telnyx"
 	"github.com/caimlas/meept/internal/voiceframe"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // VoiceWiring is the constructed voice stack carried on Components. Every
@@ -290,6 +291,11 @@ type WireVoiceDeps struct {
 	// turn runner (persona prompt + constitution stamping). Nil degrades
 	// to the daemon template persona (the legacy behavior).
 	Employees EmployeeDefinitionResolver
+	// FenceFactory (bughunt H4/S-3): the #138 per-session jail mint the
+	// voice turn runner arms on its GetOrCreateWired clones. components.go
+	// passes the SAME closure the ChatHandler/Dispatcher sites receive.
+	// Nil (fence disabled / tests) keeps the legacy un-fenced posture.
+	FenceFactory func(rootPath string, noFence bool) security.FenceStage
 	// LLMResolver is the daemon's alias resolver: the context-warm lane
 	// resolves the real turn's alias via PeekAliasForWarm (read-only) and
 	// carries the candidate on the per-request opts. Nil = the warm serves
@@ -420,10 +426,14 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		// covers the call-control + media-socket paths;
 		// voice.messaging.future_skew_seconds (row > global) covers the SMS
 		// webhook route below. 0/absent = the 60s package default, so a
-		// zero-config boot is byte-identical.
+		// zero-config boot is byte-identical. A NEGATIVE messaging value
+		// means "no override" too (L17/T-10): it inherits voice's value
+		// exactly as the schema doc promises — maxFuture() maps <=0 to
+		// the 60s default, so letting a negative through here would
+		// silently DROP the inherited voice window instead.
 		voiceFutureSkew := time.Duration(cfg.FutureSkewSeconds) * time.Second
 		smsFutureSkew := voiceFutureSkew
-		if cfg.Messaging.FutureSkewSeconds != 0 {
+		if cfg.Messaging.FutureSkewSeconds > 0 {
 			smsFutureSkew = time.Duration(cfg.Messaging.FutureSkewSeconds) * time.Second
 		}
 		verify = commhttp.VerifyFuncs{
