@@ -148,3 +148,14 @@ never blocks the plain "plan and do it" case.
 - M13-adjacent behavior change note: quick_plan turns no longer create
   two independent task rows (plan lane + orphan) — one primary task per
   brief plan (plus per-phase tasks as Synthesize expands).
+
+## Status notes
+
+- #177 (D5-adjacent owner edge, filed from leaf-04's plan-lifecycle-09
+  pin): owner chose B (2026-11-26) — operator approve of a parked
+  quick_plan brief must EXECUTE it (never zero-phase-completion).
+  LANDED: park-time plans.kind tag (26e50e54) + ApprovePlan tagged
+  branch + execution-resumer seam wired through Dispatcher.SetPlanManager
+  (97f48d0f) + e2e plan-lifecycle-09 re-pinned to approve -> executing
+  -> rollup (a2e875be). No daemon-side patch was needed: the resumer
+  arms on the existing daemon wiring line (internal/daemon/daemon.go:2183).

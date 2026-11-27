@@ -57,8 +57,14 @@ reference) fixed its execution semantics:
   it can never park a turn). When it is true, dispatch parks the row at
   `pending_approval` with the "plan created: ... (status:
   pending_approval)" reply and creates no task; the operator's
-  `plan.approve` releases it. The phrasing-based regex veto
-  (`autoSealNegatedExecute`) is deleted.
+  `plan.approve` releases it. The park stamps the row's `kind` as
+  `quick_plan`, and approval then routes the brief into the SAME
+  execution lane as the auto-approve branch (issue #177 owner ruling
+  B, 2026-11-26): the approve-time execution resumer creates the
+  strategic task, `AdoptTask` binds it (row -> `executing`), the
+  planner decomposes, and completion rolls the plan up like any other
+  quick_plan contract. It NEVER zero-phase-completes. The
+  phrasing-based regex veto (`autoSealNegatedExecute`) is deleted.
 - **Sequential compound intents ride the same lane (D4).** "Plan X and
   then implement it" is ONE task — plan-and-execute, aka quickplan. The
   dispatcher converts a sequential compound verdict into
@@ -73,11 +79,18 @@ reference) fixed its execution semantics:
   task proceeds — the contract row is degraded, the turn is not. The
   synthesis reclaimer skips adopt-stamped approved rows (re-driving
   zero-phase Synthesize would complete the brief while its task runs).
-- **Known edge:** a row parked by `approval_requested` carries zero
-  phases, so today the operator `plan.approve` runs `Synthesize`'s
-  zero-phase guard and completes the brief instantly WITHOUT executing
-  it (pinned by e2e scenario plan-lifecycle-09; owner ruling pending on
-  phase-seeding vs exemption).
+- **Ruling B replaced the old "known edge" (issue #177, 2026-11-26).**
+  A row parked by `approval_requested` carries zero phases; pre-ruling,
+  the operator `plan.approve` ran `Synthesize`'s zero-phase guard and
+  completed the brief instantly WITHOUT executing it. That is now
+  forbidden: `ApprovePlan` branches on the `kind` tag — a tagged,
+  task-less row goes to the resumer (createTask + AdoptTask + the
+  orchestrator dispatch, wired by the dispatcher's `SetPlanManager`),
+  and `Synthesize` plus the synthesis reclaimer refuse tagged rows
+  outright. With no resumer wired the row stays `approved` (honest
+  degradation, never completed). The zero-phase synthesis path applies
+  ONLY to non-quick-plan docs plans (empty `kind`). Pinned by e2e
+  scenario plan-lifecycle-09.
 
 Gated by e2e scenarios plan-lifecycle-07/08/09
 (`e2e/suites/plan-lifecycle/quickplan_contract_test.go`).
