@@ -457,7 +457,17 @@ func (e *Engine) thresholds(st TierState) (compressAt, evictAt float64) {
 
 // planCompress selects the oldest candidates (R-B5 oldest-first) worth
 // ~targetTokens of reclamation, bounded by MaxBatch, returning
-// ErrNoAction when the selection is under MinBatch.
+// ErrNoAction when the selection is under MinBatch. L15 (bughunt
+// 2026-11-27): rows the distill worker already compressed
+// (memory.RowCompressedKey flag) are skipped — re-selecting them made
+// every later pass queue a suppressed job for the same IDs AND re-shield
+// those IDs from eviction via the same-pass exclude set, so the hard band
+// spun without reclaiming. With the flag-set rows out of the compress
+// selection, a compressed row's shield expires after the pass that queued
+// it: the NEXT pass no longer selects it for compression, so it stops
+// entering the exclude set and becomes evictable exactly as this band's
+// comment promises (the content is recoverable from the distilled store,
+// so eviction is not the R-B4 last resort for it).
 func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens float64) (*Action, error) {
 	if e.deps.Candidates == nil {
 		return nil, ErrNoAction
@@ -467,6 +477,7 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 		return nil, fmt.Errorf("tierpolicy: candidates for tier %q: %w", st.Tier, err)
 	}
 	cands = excludeDemotedCopies(cands)
+	cands = excludeCompressedRows(cands)
 	var (
 		ids  []string
 		toks int
@@ -502,6 +513,10 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 // exclude (H7/A3-1) drops IDs already selected for compression in THIS
 // pass: compression is async, so same-pass eviction would delete rows
 // the distill job has not read yet. nil = no exclusion (middle band).
+// Already-distilled rows (memory.RowCompressedKey) are NOT excluded by
+// this set forever — the L15 fix in planCompress stops re-selecting them,
+// so they leave the compress pool (and this exclude set) on the next pass
+// and reclaim via eviction proceeds (see excludeCompressedRows).
 func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float64, exclude map[string]struct{}) (*Action, error) {
 	if e.deps.Candidates == nil || e.deps.Votes == nil {
 		return nil, ErrNoAction
@@ -661,6 +676,38 @@ func excludeDemotedCopies(cands []memory.MemoryResult) []memory.MemoryResult {
 			// First copy found: start a fresh slice (never mutate
 			// the caller's backing array - the daemon adapter hands
 			// us its own result slice).
+			out = make([]memory.MemoryResult, 0, len(cands))
+		}
+		out = append(out, c)
+	}
+	if out == nil {
+		return cands
+	}
+	return out
+}
+
+// excludeCompressedRows drops rows the distill worker already distilled
+// (memory.RowCompressedKey flag stamped in place, distill_async.go) from a
+// candidate pool (L15, bughunt 2026-11-27). The flag exists so the worker
+// suppresses re-distillation; before this filter it was write-only: the
+// compress selector kept picking the same oldest flag-set rows every pass,
+// the worker kept answering "suppressed", and the same-pass exclude set
+// kept those IDs out of the evict pool — the hard band never reclaimed
+// them. Skipping flag-set rows here lets eviction reclaim them on the
+// pass AFTER the one that compressed them (their exclude shield is
+// same-pass only), which is the reclamation path the hard band's
+// "Distilled rows become evictable on a LATER pass" comment always
+// described but no selector implemented.
+//
+// Rows without the flag pass through untouched. Nil-safe (same shape as
+// excludeDemotedCopies).
+func excludeCompressedRows(cands []memory.MemoryResult) []memory.MemoryResult {
+	var out []memory.MemoryResult
+	for _, c := range cands {
+		if memory.MetaStringFlag(c.Memory.Metadata, memory.RowCompressedKey) {
+			continue
+		}
+		if out == nil {
 			out = make([]memory.MemoryResult, 0, len(cands))
 		}
 		out = append(out, c)

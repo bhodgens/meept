@@ -483,9 +483,15 @@ func (w *DistillWorker) handleL1RowCompress(ctx context.Context, p L1ExtractPayl
 // (observability; the suppression check reads only RowCompressedKey).
 const RowCompressedAtKey = "l1_compressed_at"
 
-// metaStringFlag reads a boolean metadata flag in every shape a
+// MetaStringFlag reads a boolean metadata flag in every shape a
 // JSON-round-tripped SQLite map can carry (bool, "true", float64 1),
-// mirroring demotedFromMeta's shape tolerance.
+// mirroring demotedFromMeta's shape tolerance. Exported for cross-package
+// flag readers (tierpolicy's L15 compressed-row selector); metaStringFlag
+// remains the in-package alias.
+func MetaStringFlag(meta map[string]any, key string) bool {
+	return metaStringFlag(meta, key)
+}
+
 func metaStringFlag(meta map[string]any, key string) bool {
 	if meta == nil {
 		return false
