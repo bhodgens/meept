@@ -178,15 +178,26 @@ func (w *JournalWriter) OnRunClose(_ context.Context, turnID string) {
 		w.runStartedMu.Unlock()
 		return
 	}
-	markDedup(turnID, w.closedRuns, &w.closedOrder)
 	w.runStartedMu.Unlock()
 
 	// Detached from the caller's ctx on purpose: the journal must survive
 	// the turn's request context being cancelled mid-flight (same posture
 	// as record(); a cancelled turn never produces a spurious Warn).
+	//
+	// The dedup mark lands ONLY after a successful CloseRun (A2-7): a failed
+	// close leaves the turn unmarked, so a later OnRunClose (the quota-
+	// terminal path and the success path can both call this) retries the
+	// write in-process instead of silently no-op'ing until restart. The
+	// store call deliberately runs with runStartedMu RELEASED — no I/O under
+	// the mutex (root AGENTS.md).
 	ctx, cancel := context.WithTimeout(context.Background(), journalOpTimeout)
 	defer cancel()
-	if err := w.store.CloseRun(ctx, turnID); err != nil {
+
+	if err := w.store.CloseRun(ctx, turnID); err == nil {
+		w.runStartedMu.Lock()
+		markDedup(turnID, w.closedRuns, &w.closedOrder)
+		w.runStartedMu.Unlock()
+	} else {
 		w.logger.Warn("turn journal: close run failed (run stays open for rehydrate)",
 			"turn_id", turnID,
 			"error", err,
