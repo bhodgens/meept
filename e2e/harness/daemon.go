@@ -177,6 +177,17 @@ func WithExtraEnv(env map[string]string) StartOption {
 	}
 }
 
+// harnessFenceEnabled is the fence posture the sandbox daemon boots with
+// (bughunt 2026-11-27 F2): the product default flipped to true in
+// DefaultConfig (e3a8a3e8, the #138 session jail) but no e2e suite
+// exercised any tool under the jail — the harness hardcoded false, so the
+// fence-on path (including the H2/H3/M3/M4 shell arm fixes) had zero e2e
+// coverage. Override per suite with WithConfigOverlay{"projects.fence_enabled":
+// true}; suites whose scripts assume the fence-off posture override to
+// false explicitly. Default here stays FALSE (config-knob only — flipping
+// the harness default is a product decision, not a fix-wave change).
+var harnessFenceEnabled = false
+
 // Start builds the binaries once per process (sync.OnceValues), creates a
 // sandbox world under a fresh temp dir (NOT t.TempDir(): the daemon's Unix
 // socket path must stay under the macOS 104-char sun_path limit, and a
@@ -300,7 +311,7 @@ func (s *Stack) writeConfigs(sc *startConfig) {
     "enabled": true,
     "base_dir": %q,
     "auto_detect": false,
-    "fence_enabled": false,
+    "fence_enabled": %t,
   },
   "security": {
     "audit_db_path": %q,
@@ -319,6 +330,7 @@ func (s *Stack) writeConfigs(sc *startConfig) {
 		filepath.Join(s.StateDir, "tls", "key.pem"),
 		filepath.Join(s.StateDir, "memory"),
 		filepath.Join(s.StateDir, "projects"),
+		harnessFenceEnabled,
 		filepath.Join(s.StateDir, "audit.db"),
 		workGlob,
 	)
