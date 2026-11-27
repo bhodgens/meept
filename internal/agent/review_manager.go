@@ -61,8 +61,44 @@ type ReviewManager struct {
 	// store handle is built before the orchestrator wiring block that
 	// constructs this manager. Nil = the payload falls back to the agent's
 	// configured model ref alone (the pre-leaf posture).
-	metricsStore *metrics.Store
+	//
+	// Typed as the narrow reviewedModelResolver seam (bughunt 2026-11-24 M4)
+	// so the blame join's bounded-retry path is testable against a fake
+	// slow-insert store; *metrics.Store is the only production implementor.
+	metricsStore reviewedModelResolver
+
+	// blameJoinSleeper is the wait seam for the bounded re-resolve retry
+	// below (tests inject a no-op; production uses time.Sleep).
+	blameJoinSleeper func(time.Duration)
 }
+
+// reviewedModelResolver is the C3 blame-join read side: it looks up the
+// reviewed model id for a (trace, agent) pair. *metrics.Store implements it.
+// Kept deliberately one-method wide: every production fake stays honest.
+type reviewedModelResolver interface {
+	ResolveReviewedModel(traceID, agentID string) (string, error)
+}
+
+// Bounded re-resolve retry for the C3 blame join (bughunt 2026-11-24 M4).
+//
+// The write side (internal/llm/client.go recordUsage) lands the llm_calls row
+// on a fire-and-forget goroutine, while this join runs synchronously from the
+// review-completion path. On the loss race the row has not committed yet, the
+// query returns ("", nil), and blame silently fell back to the CONFIGURED
+// alias — the rating panel then blamed the wrong model for that step.
+//
+// Retry posture: only the "row not present yet" case (empty string, nil
+// error) re-resolves, on a short capped backoff totalling <= blameJoinBudget.
+// A real query error does NOT retry (it is not a race, and hammering a
+// broken store inside the completion path costs the user's turn). If the row
+// never arrives the fallback is unchanged: the configured model ref.
+const (
+	blameJoinAttempts = 4
+	blameJoinBaseWait = 50 * time.Millisecond
+	// blameJoinBudget caps total waiting so a completion path never blocks a
+	// full second on attribution cosmetics: 50+100+200 = 350ms of sleeps.
+	blameJoinBudget = 400 * time.Millisecond
+)
 
 // ReviewManagerConfig holds configuration for creating a ReviewManager.
 type ReviewManagerConfig struct {
@@ -106,6 +142,7 @@ func NewReviewManager(cfg ReviewManagerConfig) *ReviewManager {
 		bus:              cfg.Bus,
 		logger:           cfg.Logger,
 		sessionStore:     cfg.SessionStore,
+		blameJoinSleeper: time.Sleep,
 	}
 }
 
@@ -134,6 +171,37 @@ func (rm *ReviewManager) SetMetricsStore(store *metrics.Store) {
 	rm.mu.Lock()
 	rm.metricsStore = store
 	rm.mu.Unlock()
+}
+
+// resolveBlameModel runs the C3 blame join with the bounded re-resolve retry
+// documented on the const block above (bughunt 2026-11-24 M4). It returns
+// the resolved model id, the number of RESOLVES performed, and the final
+// error (nil on the "row absent" path). Only ("", nil) re-resolves; a real
+// store error stops immediately — it is not a race, and hammering a broken
+// store inside the completion path costs the user's turn.
+func (rm *ReviewManager) resolveBlameModel(traceID, agentID string) (string, int, error) {
+	sleeper := rm.blameJoinSleeper
+	if sleeper == nil {
+		sleeper = time.Sleep
+	}
+	wait := blameJoinBaseWait
+	elapsed := time.Duration(0)
+	for attempt := 1; attempt <= blameJoinAttempts; attempt++ {
+		resolved, err := rm.metricsStore.ResolveReviewedModel(traceID, agentID)
+		if err != nil {
+			return "", attempt, err
+		}
+		if resolved != "" {
+			return resolved, attempt, nil
+		}
+		if attempt == blameJoinAttempts || elapsed+wait > blameJoinBudget {
+			return "", attempt, nil
+		}
+		sleeper(wait)
+		elapsed += wait
+		wait *= 2
+	}
+	return "", blameJoinAttempts, nil
 }
 
 // reviewerLoop returns the reviewer agent loop for a review step, scoped to
@@ -1124,14 +1192,27 @@ func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *Re
 				}
 			}
 			if stepAgentID != "" {
-				if resolved, err := rm.metricsStore.ResolveReviewedModel(stepTraceID, stepAgentID); err == nil && resolved != "" {
+				// Bounded re-resolve (bughunt 2026-11-24 M4): the async
+				// llm_calls insert may not have landed when this join runs,
+				// so an empty-but-clean answer retries on a capped backoff
+				// before falling back to the configured model ref.
+				resolved, attempts, err := rm.resolveBlameModel(stepTraceID, stepAgentID)
+				if err == nil && resolved != "" {
 					reviewedModelID = resolved
 				} else if err != nil {
 					rm.logger.Debug("blame join failed; keeping configured model ref",
 						"step_id", stepID,
 						"trace_id", stepTraceID,
 						"agent_id", stepAgentID,
+						"attempts", attempts,
 						"error", err,
+					)
+				} else if attempts > 1 {
+					rm.logger.Debug("blame join: no llm_calls row after bounded retry; keeping configured model ref",
+						"step_id", stepID,
+						"trace_id", stepTraceID,
+						"agent_id", stepAgentID,
+						"attempts", attempts,
 					)
 				}
 			}
