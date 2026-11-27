@@ -183,6 +183,66 @@ func expiredLocked(row storeRow, now int64) bool {
 	return row.Expiry != 0 && now >= row.Expiry
 }
 
+// expiredDiskRow is one swept row destined for the on-disk DELETE: the
+// mirror key's captured expiry rides along so the unlock→DELETE window
+// (S-7/F12 TOCTOU) can tell a refreshed row from a still-expired one.
+type expiredDiskRow struct {
+	sessionID string
+	token     string
+	expiry    int64
+}
+
+// sweepExpiryOf returns the expiry the sweep captured for mirror key k,
+// or 0 when the key had no usable disk identity (splitStoreKey failed).
+// A refreshed row's expiry differs (or is 0 = no-TTL), so the equality
+// check in the prune loop keeps exactly the still-expired rows.
+func sweepExpiryOf(rows []expiredDiskRow, k string) int64 {
+	sid, tok, ok := splitStoreKey(k)
+	if !ok {
+		return 0
+	}
+	for _, p := range rows {
+		if p.sessionID == sid && p.token == tok {
+			return p.expiry
+		}
+	}
+	return 0
+}
+
+// sweepDeleteAndPrune is the second phase of the expired-row sweep,
+// extracted from Put (S-7/F12): the on-disk DELETE and the mirror prune
+// that both used to run inline after Put's unlock. The disk DELETE is
+// guarded with the swept row's captured expiry so a concurrent re-Put of
+// the same (session, token) — an UPSERT onto the same primary key with a
+// fresh expiry — is never deleted, and the mirror prune re-checks each
+// key under the lock so a refreshed row's mapping survives. The gate is
+// len(expMem)+len(expFwd), not len(expDisk): splitStoreKey failures must
+// not skip the prune (that left orphan fwd entries).
+func (st *SwapStore) sweepDeleteAndPrune(expMem []string, expFwd []string, expDisk []expiredDiskRow) {
+	for _, p := range expDisk {
+		if _, err := st.db.Exec(`DELETE FROM pii_swaps
+			WHERE session_id = ? AND token = ? AND expiry = ?`,
+			p.sessionID, p.token, p.expiry); err != nil {
+			break // store likely closed/busy; mirrors below are still pruned
+		}
+	}
+	if len(expMem) > 0 || len(expFwd) > 0 {
+		st.mu.Lock()
+		for _, k := range expMem {
+			if row, has := st.mem[k]; !has || row.Expiry != sweepExpiryOf(expDisk, k) {
+				// Row vanished or was refreshed (re-Put) since the
+				// sweep: leave it alone.
+				continue
+			}
+			delete(st.mem, k)
+		}
+		for _, k := range expFwd {
+			delete(st.fwd, k)
+		}
+		st.mu.Unlock()
+	}
+}
+
 // Put records a swap mapping for sessionID. Re-Putting the same
 // (session, token) pair is an idempotent update.
 //
@@ -218,14 +278,16 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 	// Collect the expired rows (never the one just inserted) for eviction.
 	var expMem []string
 	var expFwd []string
-	var expDisk [][2]string // {sessionID, token}
+	// expDisk carries the captured expiry per row (S-7/F12): the DELETE
+	// below runs OUTSIDE the lock, so it must be able to tell a still-
+	// expired row from one a concurrent Put has refreshed in the interim.
+	var expDisk []expiredDiskRow // {sessionID, token, expiry}
 	if st.ttlSec > 0 {
 		for k, row := range st.mem {
 			if k != mkey && expiredLocked(row, now) {
 				expMem = append(expMem, k)
-				sid, _, ok := splitStoreKey(k)
-				if ok {
-					expDisk = append(expDisk, [2]string{sid, row.Token})
+				if sid, _, ok := splitStoreKey(k); ok {
+					expDisk = append(expDisk, expiredDiskRow{sessionID: sid, token: row.Token, expiry: row.Expiry})
 				}
 			}
 		}
@@ -248,22 +310,18 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 		return ErrStoreClosed
 	}
 
-	// Disk eviction of the swept rows: best-effort, outside the lock.
-	for _, p := range expDisk {
-		if _, err := db.Exec(`DELETE FROM pii_swaps WHERE session_id = ? AND token = ?`, p[0], p[1]); err != nil {
-			break // store likely closed/busy; mirrors below are still pruned
-		}
-	}
-	if len(expDisk) > 0 {
-		st.mu.Lock()
-		for _, k := range expMem {
-			delete(st.mem, k)
-		}
-		for _, k := range expFwd {
-			delete(st.fwd, k)
-		}
-		st.mu.Unlock()
-	}
+	// Disk eviction of the swept rows + mirror prune: best-effort,
+	// outside the lock. S-7/F12 TOCTOU: between the sweep above and the
+	// DELETE another goroutine may re-Put the same (session, token) with
+	// a fresh expiry — its INSERT upserts the SAME primary key, so an
+	// unconditional DELETE here would erase the fresh row and the mirror
+	// prune would drop its mapping while its Put already returned nil.
+	// The captured expiry guards both directions: the DELETE only removes
+	// a row whose on-disk expiry still equals the swept one, and the
+	// mirror prune re-checks each row under the lock. Extracted as a
+	// method (not inline in Put) so the F12/S-7 pin drives the REAL
+	// phases — reverting the guards inside it fails the pin.
+	st.sweepDeleteAndPrune(expMem, expFwd, expDisk)
 
 	if _, err := db.Exec(`INSERT INTO pii_swaps (session_id, token, value, class, expiry)
 		VALUES (?, ?, ?, ?, ?)
