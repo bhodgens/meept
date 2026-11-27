@@ -32,6 +32,7 @@ import (
 	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/voice"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // TopicVoiceCallProgress is the typed voice.call.progress declaration.
@@ -134,6 +135,14 @@ type VoiceEmployeeDeps struct {
 	// (D1). Keyed by the bound employee id — the same id SetAgentID
 	// stamps (caller-authz leaf 02 precedent).
 	MomentResolver func(employeeID string) func() string
+
+	// FenceFactory (bughunt H4/S-3): mints the #138 per-session fence
+	// stage the voice turn runner arms on every GetOrCreateWired clone.
+	// The daemon passes the SAME mint the chat/dispatch lanes receive
+	// (components.go), so a voice turn cannot write outside its session
+	// root. Nil (tests / fence disabled) keeps the legacy posture: the
+	// clone inherits the template's un-fenced base checker.
+	FenceFactory func(rootPath string, noFence bool) security.FenceStage
 
 	// SchedulerTZ is the daemon's [scheduler] timezone (C-8, stamp-clock
 	// fallback chain): used for the voice turn stamp when the bound
@@ -256,6 +265,14 @@ type loopTurnRunner struct {
 	// guidedIntakePromptFor resolves the guided-intake procedure block
 	// for the bound employee (leaf 05). nil = never stamped.
 	guidedIntakePromptFor func(employeeID string) string
+
+	// fenceFactory (bughunt H4/S-3) mints the #138 per-session fence
+	// stage armed on every GetOrCreateWired clone this runner serves.
+	// The MANAGER carries the same seam (Manager.SetSessionFenceFactory)
+	// and arms at loop construction; this runner-side copy is the
+	// belt-and-suspenders arm for a manager wired without its factory
+	// (test Managers, wiring order). nil = the manager posture decides.
+	fenceFactory func(rootPath string, noFence bool) security.FenceStage
 
 	// Prior-reasoning retention (voice lane): the LAST captured
 	// llm.Response.Reasoning from a voice turn on each session, bounded
@@ -455,13 +472,40 @@ func templateRegistry(loop *agent.AgentLoop) agent.ToolRegistry {
 // lane's GetOrCreateWired pattern; the goal-loop lane has no session
 // cache, so the clone lives for exactly one turn). Returns nil when the
 // template is nil so callers fail loudly instead of panicking.
-func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID string, c *employee.Constitution) *agent.AgentLoop {
+// fenceStage is the optional per-turn fence mint (bughunt H4/S-3). Nil
+// keeps the legacy posture: the clone inherits the template's checker
+// untouched. Non-nil arms the SAME compose the chat/dispatch lanes run
+// (composeLoopFence: session jail + additive group fs_roots) rooted at
+// the template's working directory, so an employee turn cannot write
+// outside its session root even though the clone is throwaway.
+type employeeTurnFence func(rootPath string, noFence bool) security.FenceStage
+
+func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID string, c *employee.Constitution, fence employeeTurnFence) *agent.AgentLoop {
 	if template == nil {
 		return nil
 	}
 	clone := agent.NewAgentLoop(conversationID, template.GetWorkingDir(), template.ConfigSnapshot()...)
 	if clone == nil {
 		return nil
+	}
+	// Bughunt H4/S-3: arm the per-session jail on the throwaway clone.
+	// The template's checker carries only the daemon-wide allowed_paths
+	// globs — without this the clone's file_write/shell surface reaches
+	// anywhere those globs admit. There is no --nofence lookup on this
+	// path: the turn runner carries no session store, so the fence stays
+	// ON (fail closed). A future caller with a store can thread the
+	// override through here without reshaping the seam.
+	if fence != nil && template.GetWorkingDir() != "" {
+		const noFence = false
+		// composeLoopFence refuses a nil base; a checker-less clone gets a
+		// fresh empty base so the jail still arms (fail closed).
+		base := clone.Security()
+		if base == nil {
+			base = security.NewPermissionChecker(security.Config{})
+		}
+		if armed := agent.ComposeSessionFence(base, fence, template.GetWorkingDir(), noFence, clone.GroupResolution()); armed != nil {
+			clone.SetSecurityChecker(armed)
+		}
 	}
 	if employeeID != "" {
 		// Same authz stamp as the voice lane: the executor injects
@@ -630,11 +674,41 @@ func (r *loopTurnRunner) resolveVoiceTurnLocation(ctx context.Context, employeeI
 	return time.Local
 }
 
+// loopHasFenceStage reports whether the loop's checker already carries a
+// fence stage (bughunt H4/S-3). Used by the voice turn runner to skip the
+// belt-and-suspenders arm when the manager already armed the jail at loop
+// construction. A nil checker reports false (nothing armed).
+func loopHasFenceStage(loop *agent.AgentLoop) bool {
+	checker := loop.Security()
+	if checker == nil {
+		return false
+	}
+	return checker.FenceStageSet()
+}
+
 // Run implements voice.TurnRunner.
 func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prompt string) (string, error) {
 	loop, err := r.mgr.GetOrCreateWired(sess.ID, r.workingDir, r.template)
 	if err != nil {
 		return "", fmt.Errorf("voice turn runner: wired loop for %s: %w", sess.ID, err)
+	}
+	// Bughunt H4/S-3 belt-and-suspenders arm: GetOrCreateWired arms the
+	// jail when the MANAGER carries a factory (SetSessionFenceFactory),
+	// but a manager wired without one (test Managers, wiring order)
+	// would hand back the template's un-fenced checker. When this runner
+	// holds a factory and the loop still shows a checker without a fence
+	// stage, compose here. Cheap: composeLoopFence only clones+re-arms
+	// when the mint yields a live stage.
+	if r.fenceFactory != nil && !loopHasFenceStage(loop) {
+		// composeLoopFence refuses a nil base; a checker-less loop gets a
+		// fresh empty base so the jail still arms (fail closed).
+		base := loop.Security()
+		if base == nil {
+			base = security.NewPermissionChecker(security.Config{})
+		}
+		if armed := agent.ComposeSessionFence(base, r.fenceFactory, r.workingDir, false, loop.GroupResolution()); armed != nil {
+			loop.SetSecurityChecker(armed)
+		}
 	}
 	employeeID := sess.EmployeeID
 	// AgentID fix (caller-authz leaf 02, O5): voice clones execute with
@@ -920,6 +994,10 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 			// Guided intake prompt seam (leaf 05): resolved per bound
 			// employee id; empty = no extension.
 			guidedIntakePromptFor: deps.GuidedIntakePromptFor,
+			// Bughunt H4/S-3: the manager arms the jail itself when this
+			// factory is wired; the runner passes it through so the arm
+			// never depends on components.go wiring order.
+			fenceFactory: deps.FenceFactory,
 		},
 		Progress: progressPublisherFunc(progressFn),
 		Logger:   logger.With("component", "voice-binding"),

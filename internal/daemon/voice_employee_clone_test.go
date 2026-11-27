@@ -37,7 +37,7 @@ func TestClone_InheritsDrainer(t *testing.T) {
 	}}
 	template.SetMessageDrainer(mock)
 
-	clone := employeeTurnClone(template, "conv-clone", "worker", nil)
+	clone := employeeTurnClone(template, "conv-clone", "worker", nil, nil)
 	if clone == nil {
 		t.Fatal("employeeTurnClone returned nil for a non-nil template")
 	}

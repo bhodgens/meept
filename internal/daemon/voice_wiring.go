@@ -607,7 +607,10 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		GuidedIntakePromptFor: func(employeeID string) string {
 			return guidedIntakePromptExtension(cfg, employeeID)
 		},
-		Logger: vlog.With("sub", "employee"),
+		// Bughunt H4/S-3: the same jail mint components.go passes — the
+		// manager arms at loop construction and the runner re-checks.
+		FenceFactory: deps.FenceFactory,
+		Logger:       vlog.With("sub", "employee"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)

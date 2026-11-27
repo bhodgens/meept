@@ -5256,6 +5256,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 	}
 
+	// Bughunt H4/S-3 (fifth site): the MANAGER itself arms the fence on
+	// every loop GetOrCreateWired builds. The voice lane
+	// (loopTurnRunner.Run -> GetOrCreateWired) and the employee clone
+	// path took their loops from here with the template's UN-fenced base
+	// checker — the e3a8a3e8 "every lane" claim missed these lanes. Same
+	// mint, same gate as the ChatHandler/Dispatcher/step-job sites.
+	if c.AgentLoopManager != nil && cfg.Security.FenceEnabled {
+		fenceAllowRead := cfg.Security.FenceAllowRead
+		c.AgentLoopManager.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
+		})
+	}
+
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
 	// Issue #137: the step-job lane arms the same #138 session jail as the
@@ -5841,6 +5854,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// [awareness] is enabled (nil otherwise -> the turn runner
 			// stamps nothing, voice prompts byte-identical, D1).
 			MomentResolver: c.momentRendererFor,
+			// Bughunt H4/S-3: the voice turn runner arms the same #138 jail
+			// mint the chat/dispatch lanes receive — belt-and-suspenders
+			// beside the Manager-level arm above, so a voice clone can never
+			// end up on the template's un-fenced checker. Same gate: fence
+			// disabled (or nil factory) keeps the legacy posture.
+			FenceFactory: func() func(rootPath string, noFence bool) security.FenceStage {
+				if !cfg.Security.FenceEnabled {
+					return nil
+				}
+				voiceAllowRead := cfg.Security.FenceAllowRead
+				return func(rootPath string, noFence bool) security.FenceStage {
+					return agent.NewSessionFenceStage(rootPath, voiceAllowRead, noFence, logger)
+				}
+			}(),
 		}
 		// Contact-display store (contact-display leaf 02): a second
 		// handle on the SAME contacts.db the chain uses (WAL +

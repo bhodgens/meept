@@ -39,7 +39,7 @@ func TestEmployeeToolfilter_TurnCloneFiltersNotTemplate(t *testing.T) {
 		ToolsAllowed: []string{"inbox"},
 	}}
 
-	clone := employeeTurnClone(template, "conv-etf-1", "secretary", c)
+	clone := employeeTurnClone(template, "conv-etf-1", "secretary", c, nil)
 	if clone == nil {
 		t.Fatal("employeeTurnClone returned nil for a live template")
 	}
@@ -65,7 +65,7 @@ func TestEmployeeToolfilter_TurnCloneFiltersNotTemplate(t *testing.T) {
 }
 
 func TestEmployeeToolfilter_TurnCloneNilTemplate(t *testing.T) {
-	if got := employeeTurnClone(nil, "conv", "emp", &employee.Constitution{}); got != nil {
+	if got := employeeTurnClone(nil, "conv", "emp", &employee.Constitution{}, nil); got != nil {
 		t.Fatal("nil template must yield a nil clone, never a panic")
 	}
 }

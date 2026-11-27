@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // DetectionContext captures client-side context for session creation.
@@ -25,6 +26,14 @@ type Manager struct {
 	loops        map[string]*AgentLoop // sessionID → loop
 	sessionStore session.Store
 	projectMgr   *project.ProjectManager
+	// fenceFactory (bughunt H4/S-3, via SetSessionFenceFactory) arms the
+	// #138 per-session jail on loops built by GetOrCreateWired. The
+	// voice lane (loopTurnRunner.Run) and every other manager consumer
+	// previously received clones carrying the template's UN-fenced base
+	// checker — the chat/dispatch/step lanes fenced, these did not.
+	// Nil (default/tests) keeps the legacy posture byte-identical: no
+	// fence is ever installed by the manager itself.
+	fenceFactory sessionFenceFactory
 }
 
 // ManagerConfig holds configuration for the manager.
@@ -88,6 +97,23 @@ func cacheKey(sessionID, templateAgentID string) string {
 	return sessionID + "\x00" + templateAgentID
 }
 
+// SetSessionFenceFactory wires the factory that mints a FRESH,
+// session-owned fence stage for every loop GetOrCreateWired builds
+// (bughunt H4/S-3): the voice lane and the employee clone path take their
+// loops from this manager, so the #138 per-session jail must arm HERE,
+// at the shared construction point, exactly like the ChatHandler and
+// Dispatcher sites. A nil factory (the default) keeps the legacy
+// posture: GetOrCreateWired installs no fence itself. Mirrors
+// ChatHandler.SetSessionFenceFactory / Dispatcher.SetSessionFenceFactory.
+func (m *Manager) SetSessionFenceFactory(factory sessionFenceFactory) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.fenceFactory = factory
+	m.mu.Unlock()
+}
+
 // GetOrCreateWired returns an existing loop for (sessionID, template-agent),
 // or creates a new one whose configuration (LLM client, tools, skills,
 // hooks) is mirrored from template. The template is typically the daemon's
@@ -96,6 +122,15 @@ func cacheKey(sessionID, templateAgentID string) string {
 // workingDir is the project directory for the new loop; it overrides any
 // value on the template (per-session isolation). All other config is copied
 // via template.ConfigSnapshot().
+//
+// Bughunt H4/S-3: a newly created loop arms the per-session fence through
+// composeLoopFence when a factory is wired (SetSessionFenceFactory) — the
+// same compose the chat/dispatch lanes run, so the session jail AND the
+// additive group fs_roots fence engage on voice/employee lanes too. The
+// per-session --nofence override is honored from the session row when the
+// session store is wired; an unwired store or an unknown session id falls
+// back to the fence-on posture (fail closed, never open). Cached loops are
+// returned untouched: they were armed at creation under the same rule.
 func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *AgentLoop) (*AgentLoop, error) {
 	// Collect stale loop under lock, Close it outside lock (CLAUDE.md mutex scope rule).
 	var staleLoop *AgentLoop
@@ -140,6 +175,17 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 		closeStaleScopedLoop(staleLoop, slog.Default(), sessionID) //nolint:mutexio // staleLoop is collected outside lock scope
 	}
 
+	// Bughunt H4/S-3: resolve the per-session --nofence override BEFORE
+	// taking m.mu. mutexio rule (no I/O under mutex): sessionStore.Get
+	// reads the store's own lock, so the lookup runs outside m.mu — the
+	// value is a stable session-row flag read once at loop creation.
+	noFence := false
+	if m.sessionStore != nil {
+		if sess := m.sessionStore.Get(sessionID); sess != nil { //nolint:mutexio // store's own lock; m.mu not held yet
+			noFence = sess.NoFence
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -158,6 +204,27 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 
 	opts := template.ConfigSnapshot()
 	loop := NewAgentLoop(sessionID, workingDir, opts...)
+	// Bughunt H4/S-3: arm the per-session fence on the freshly built
+	// loop — the voice lane (loopTurnRunner.Run) and the employee clone
+	// path run their turns on THIS loop with no other fence arm site.
+	// Same compose the chat/dispatch lanes use: session jail + additive
+	// group fs_roots in one pass. An unwired store or an unknown id keeps
+	// the fence ON (fail closed). A nil factory leaves the loop's
+	// checker untouched (legacy posture, byte-identical).
+	if m.fenceFactory != nil {
+		// composeLoopFence refuses a nil base (returns nil), which would
+		// silently leave a nil-checker template UNFENCED. A checker-less
+		// template gets a fresh empty base — the fence then rides on it
+		// (fail closed: the jail exists even when no allowed_paths globs
+		// are configured).
+		base := loop.security
+		if base == nil {
+			base = security.NewPermissionChecker(security.Config{})
+		}
+		if fence := composeLoopFence(base, m.fenceFactory, workingDir, noFence, loop.GroupResolution()); fence != nil {
+			loop.SetSecurityChecker(fence)
+		}
+	}
 	m.loops[key] = loop
 	return loop, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // employeeServiceAdapter wraps *employee.Manager to satisfy the
@@ -291,6 +292,19 @@ type agentLoopBotExecutorAdapter struct {
 	employeeID string
 	// sessions is the existing session store. Nil is a no-op (gate tests).
 	sessions session.Store
+	// fenceFactory (bughunt H4/S-3, via WithEmployeeFenceFactory) arms the
+	// #138 per-session jail on every per-turn employee clone. Nil (the
+	// default/test posture) keeps the clones on the template's base
+	// checker — the daemon wires the SAME mint the chat/dispatch lanes
+	// receive so the jail posture cannot drift between lanes.
+	fenceFactory func(rootPath string, noFence bool) security.FenceStage
+}
+
+// WithEmployeeFenceFactory wires the per-turn-clone fence mint (bughunt
+// H4/S-3). Returns the receiver for call chaining.
+func (a *agentLoopBotExecutorAdapter) WithEmployeeFenceFactory(f func(rootPath string, noFence bool) security.FenceStage) *agentLoopBotExecutorAdapter {
+	a.fenceFactory = f
+	return a
 }
 
 // ExecuteBot runs a single turn through the agent loop. systemPrompt is
@@ -406,7 +420,7 @@ func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemP
 			"session_id", conversationID,
 			"error", err)
 	}
-	clone := employeeTurnClone(a.inner.agentLoop, conversationID, a.employeeID, &c)
+	clone := employeeTurnClone(a.inner.agentLoop, conversationID, a.employeeID, &c, a.inner.fenceFactory)
 	if clone == nil {
 		return "", 0, fmt.Errorf("employee-bound executor %q: per-turn clone failed", a.employeeID)
 	}
