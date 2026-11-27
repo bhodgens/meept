@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/plan"
@@ -29,6 +30,24 @@ const coldInterviewScanLimit = 200
 // within the window falls through like the pre-fix shape — documented
 // limitation of this LOW-finding fix, not a regression).
 var coldInterviewClaims sync.Map
+
+// coldInterviewArmed is the cheap precondition gating the restart-miss
+// store scan (bughunt A-6/L2 fixwave 2026-11-27): DeliverInterviewAnswer
+// runs on EVERY chat turn before classification, the waiter miss is the
+// COMMON case, and the ungated shape paid a planning-task table scan plus
+// N GetByID reads per ordinary turn. It counts interview blocks this
+// process has successfully PERSISTED (incremented by StoreInterviewState
+// on a successful write, decremented by ClearInterviewState on a
+// successful delete): at zero, no persisted block can exist that this
+// process wrote, so the scan cannot match and is skipped entirely. A
+// daemon restart clears process memory by construction — the same event
+// that makes the cold path reachable also disarms the gate — so the
+// gate trades one documented window (a user's FIRST answer after a
+// restart falls through as an ordinary turn; the L8 recovery stays live
+// for interviews armed after boot, which the L8 pin arms through
+// StoreInterviewState) for a zero-scan steady state. It is a counter, not
+// a bool, so two concurrent interviews stay armed until BOTH resolve.
+var coldInterviewArmed atomic.Int64
 
 // Interview pause surfacing + answer seam (interactive-usability leaf 04,
 // master contract C-3): the planner's design-interview pause becomes
@@ -117,7 +136,10 @@ func formatInterviewQuestions(questions []string) string {
 // StoreInterviewState writes the waiting-interview block into the task's
 // metadata and stamps the waiting-since time. Best-effort: persistence
 // failures degrade to the in-memory waiter (logged, never fatal — the
-// pause itself already happened).
+// pause itself already happened). A SUCCESSFUL write arms the cold-scan
+// gate (coldInterviewArmed): the persisted block is exactly what the
+// restart-miss scan matches, so arming at the write keeps the gate and
+// the store truthful together.
 func (sp *StrategicPlanner) StoreInterviewState(t *task.Task, req PlanRequest, st *plannerInterviewState) {
 	st.SentAt = time.Now().UTC().Format(time.RFC3339)
 	if b, err := json.Marshal(st); err == nil && sp.taskStore != nil {
@@ -135,12 +157,17 @@ func (sp *StrategicPlanner) StoreInterviewState(t *task.Task, req PlanRequest, s
 				t.Metadata = prev
 				sp.logger.Warn("Failed to persist interview wait state",
 					"task_id", req.TaskID, "error", err)
+			} else {
+				coldInterviewArmed.Add(1)
 			}
 		}
 	}
 }
 
 // ClearInterviewState removes the waiting block after answers arrive.
+// A successful delete disarms this task's contribution to the cold-scan
+// gate (both the hot consume and the cold delivery land here), keeping
+// the counter aligned with the persisted blocks that remain.
 func (sp *StrategicPlanner) ClearInterviewState(taskID string) {
 	if sp == nil || sp.taskStore == nil || taskID == "" {
 		return
@@ -166,6 +193,13 @@ func (sp *StrategicPlanner) ClearInterviewState(taskID string) {
 			t.Metadata = prev
 			sp.logger.Warn("Failed to clear interview wait state",
 				"task_id", taskID, "error", err)
+		} else {
+			if coldInterviewArmed.Add(-1) < 0 {
+				// Clamp a double clear (store-failure retry path) so the
+				// gate cannot go permanently negative and disable later
+				// interviews' arm.
+				coldInterviewArmed.Store(0)
+			}
 		}
 	}
 }
@@ -326,6 +360,12 @@ func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (st
 	}
 	if waiter == nil {
 		sp.mu.Unlock()
+		// Cold-scan gate (bughunt A-6): with no interview block persisted
+		// by this process, the scan cannot match — skip it so the common
+		// no-interview turn pays no store traffic.
+		if coldInterviewArmed.Load() == 0 {
+			return "", false
+		}
 		return sp.deliverColdInterviewAnswer(sessionID, answer)
 	}
 	delete(sp.interviewWaiters, taskID)
@@ -369,6 +409,12 @@ func (sp *StrategicPlanner) deliverColdInterviewAnswer(sessionID, answer string)
 		"task_id", t.ID, "session_id", sessionID)
 
 	sp.ClearInterviewState(t.ID)
+	// Drop the claim: the interview resolved, so the duplicate-guard
+	// entry would leak for the process lifetime (bughunt A-6 pruning
+	// leg). Keeping it until Plan SUCCEEDS is useless — a failed resume
+	// fails the task outright (failTaskWithReason), there is no second
+	// chance for this task id.
+	coldInterviewClaims.Delete(t.ID)
 	go sp.resumeColdInterview(t, st, answer)
 	return "Thanks — resuming the plan with your answers.", true
 }
@@ -586,7 +632,8 @@ func splitInterviewAnswer(answers []string, questionCount int) []string {
 // session message, stamps the task metadata, parks the answer waiter,
 // and Touches the tracked turn so the watchdog sees a live human wait.
 // Best-effort persistence: a missing sink (unit tests, CLI evals) or a
-// store failure never fails the pause itself.
+// store failure never fails the pause itself. The cold-scan gate arms
+// INSIDE StoreInterviewState on a successful write.
 func (sp *StrategicPlanner) deliverPlannerInterview(t *task.Task, req PlanRequest, pctx *plan.PlanningContext) {
 	questions := pctx.InterviewQuestions
 	if len(questions) == 0 {
@@ -617,7 +664,8 @@ func (sp *StrategicPlanner) deliverPlannerInterview(t *task.Task, req PlanReques
 	}
 
 	// 2. Stamp the task's waiting-interview state (watchdog exemption +
-	// handler answer lookup).
+	// handler answer lookup). The cold-scan gate arms inside the store
+	// write on success.
 	sp.StoreInterviewState(t, req, &plannerInterviewState{
 		TaskID:    req.TaskID,
 		SessionID: req.SessionID,

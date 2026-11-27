@@ -27,6 +27,39 @@ type Store struct {
 	logger    *slog.Logger
 }
 
+// NewStoreFromDB wraps an ALREADY-OPEN tasks database: pool sizing,
+// migration, and the step store init are identical to NewStore, minus the
+// sql.Open. NewStore delegates here; the scan-gate pins in internal/agent
+// also call it directly, routing sql.Open through a counting driver
+// wrapper without touching production wiring. The caller owns the handle
+// on error (NewStore closes it; the pin harness closes it via cleanup).
+func NewStoreFromDB(db *sql.DB, logger *slog.Logger) (*Store, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	// Serialize writes at the connection-pool level: sqlite allows exactly
+	// one writer at a time, so a pool wider than the writer count only adds
+	// BUSY handoffs. Multiple *readers* remain allowed under WAL.
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+	store := &Store{
+		db:     db,
+		logger: logger,
+	}
+	if err := store.migrate(); err != nil {
+		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	}
+	// Initialize step store using the same database connection
+	stepStore, err := NewStepStore(db, logger.With("component", "step-store"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize step store: %w", err)
+	}
+	store.stepStore = stepStore
+	return store, nil
+}
+
 // NewStore creates a new SQLite-backed task store. Schema migrations are
 // declared in migrations.go (storeMigrations) and applied at the end of
 // migrate(); the tasks database is shared with StepStore, whose column
@@ -47,34 +80,19 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	// Serialize writes at the connection-pool level: sqlite allows exactly
-	// one writer at a time, so a pool wider than the writer count only adds
-	// BUSY handoffs. Multiple *readers* remain allowed under WAL.
-	db.SetMaxOpenConns(1)
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	store := &Store{
-		db:     db,
-		logger: logger,
-	}
-
-	if err := store.migrate(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
-	}
-
-	// Initialize step store using the same database connection
-	stepStore, err := NewStepStore(db, logger.With("component", "step-store"))
+	defer func() {
+		if db != nil {
+			if cerr := db.Close(); cerr != nil {
+				logger.Warn("task store: closing failed handle after construction error", "error", cerr)
+			}
+		}
+	}()
+	store, err := NewStoreFromDB(db, logger)
 	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to initialize step store: %w", err)
+		return nil, err
 	}
-	store.stepStore = stepStore
-
-	logger.Info("Task store initialized", "path", dbPath)
+	db = nil // ownership transferred to the store
+	store.logger.Info("Task store initialized", "path", dbPath)
 	return store, nil
 }
 
