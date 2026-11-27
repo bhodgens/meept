@@ -2543,7 +2543,15 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		// step (context-too-small verdict, quota-blocked pool, empty
 		// response, gate block) renders as actionable copy on
 		// turn.terminal / chat_message, never as a raw error string.
-		relayError = UserFacingError(errors.New(relayError))
+		//
+		// bughunt 2026-11-24 M8: the relay carries errors as JSON strings,
+		// and errors.New(text) erased the type — every typed lane inside
+		// UserFacingError (IsContextTooSmall, IsTierFloorError, quota,
+		// empty) saw a bare errorString and the user got the sanitized raw
+		// text instead of the actionable sentence. RelayError restores the
+		// typed cause from the machine-sentinel prefix so those lanes fire
+		// again; the wire stays a string (ChatResponse.Error is string).
+		relayError = UserFacingError(&RelayError{Text: relayError, Cause: relayCause(relayError)})
 		relayReply = "the task failed: " + relayError
 	}
 
