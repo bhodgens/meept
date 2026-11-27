@@ -168,6 +168,21 @@
       "l2_enabled": false,
       "l2_db_path": "",
       "default_ttl_min": 0,
+      // Semantic second-chance tier (llm.cache.semantic.*). Ships
+      // ENABLED by default (audit-P4 owner ruling, 2026-11-27; opt-out:
+      // set enabled=false). Behaviorally inert unless BOTH this exact-key
+      // cache above is enabled AND an embedder resolves (embedder_alias
+      // or memory.embeddings) -- otherwise the tier degrades to
+      // exact-only, never an error. Responses carrying tool calls are
+      // never stored and never served from this tier.
+      "semantic": {
+        "enabled": true,
+        "threshold": 0.95,          // cosine floor (R0 addendum)
+        "max_entries": 1024,        // vector store bound (LRU)
+        "ttl_min": 0,               // 0 mirrors default_ttl_min above
+        "embedder_alias": "",       // "" reuses the memory-stack embedder
+        "verify_floor": 0,          // 0 disables the two-stage verify band
+      },
     },
   },
 

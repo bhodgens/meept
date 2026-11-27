@@ -32,9 +32,11 @@ package llm
 //   - Partition: entries key on (model, instruction fingerprint) --
 //     answers never leak across models or capability scopes
 //     (findings Section 1.3 item 5).
-//   - Disabled (llm.cache.semantic.enabled=false, the default) means the
+//   - Disabled (explicit llm.cache.semantic.enabled=false) means the
 //     code path is structurally unreachable: no embedder call, no vector
-//     math, immediate miss.
+//     math, immediate miss. Enabled is the shipped default (audit-P4
+//     owner ruling 2026-11-27), but the tier is inert until an embedder
+//     resolves (see the daemon wiring degrade).
 //
 // No mutex is held across I/O: the embedder call happens OUTSIDE the
 // store lock (mutexio analyzer). Stdlib-only vector math: float32 dot

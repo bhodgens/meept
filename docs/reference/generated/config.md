@@ -3502,9 +3502,13 @@ LLMSimpleFeatureConfig configures a simple feature with enabled flag and optiona
 	    L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
 	    DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
 	    // Semantic configures the semantic cache tier (llm-serving-tiers
-	    // leaf 02, Contract C4; json5 key llm.cache.semantic). Default OFF:
-	    // opt-in per docs/agents/opt-in-defaults.md -- no embedder call, no
-	    // vector math, byte-identical client behavior when disabled.
+	    // leaf 02, Contract C4; json5 key llm.cache.semantic). Default ON
+	    // since the audit-P4 owner ruling (2026-11-27; opt-out documented
+	    // in docs/agents/opt-in-defaults.md) -- but behaviorally inert on
+	    // default installs: with no embedder resolving, buildSemanticCacheTier
+	    // degrades to exact-only, and an explicit enabled=false keeps the
+	    // tier's code path structurally unreachable (byte-identical client
+	    // behavior).
 	    Semantic SemanticCacheConfig `json:"semantic"        toml:"semantic"`
 	}
 
@@ -5581,10 +5585,13 @@ SemanticCacheConfig configures the opt\-in semantic cache tier \(llm\-serving\-t
 Threshold default is 0.95 cosine per the R0 research addendum \(docs/research/20261031\-llm\-serving\-tiers\-findings.md Section 1.2\), which supersedes master.md C4's 0.92: AWS Well\-Architected, Redis LangCache, and Vercel converge on 0.95\+ for false\-positive\-sensitive workloads, and agent traffic \(tool calls, code, one\-operand differences\) is exactly where loose thresholds produce wrong answers.
 
 	type SemanticCacheConfig struct {
-	    // Enabled turns the tier on. Default FALSE (opt-in per
-	    // docs/agents/opt-in-defaults.md): when false the client's code path
-	    // is structurally unreachable -- no embedder call, no vector math,
-	    // byte-identical responses.
+	    // Enabled turns the tier on. Default TRUE since the audit-P4 owner
+	    // ruling (2026-11-27; opt-out per docs/agents/opt-in-defaults.md):
+	    // Load unmarshals user config onto DefaultConfig, so an absent key
+	    // means on and an explicit false still wins. When false the client's
+	    // code path is structurally unreachable -- no embedder call, no
+	    // vector math, byte-identical responses. With true but no resolvable
+	    // embedder the tier degrades to exact-only (never an error).
 	    Enabled bool `json:"enabled"        toml:"enabled"`
 	    // Threshold is the cosine similarity floor for serving a cached
 	    // response. Default 0.95 (research addendum; supersedes C4's 0.92).

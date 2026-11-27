@@ -1426,9 +1426,13 @@ type LLMSimpleFeatureConfig struct {
 	L2DBPath      string `json:"l2_db_path"      toml:"l2_db_path"`
 	DefaultTTLMin int    `json:"default_ttl_min" toml:"default_ttl_min"`
 	// Semantic configures the semantic cache tier (llm-serving-tiers
-	// leaf 02, Contract C4; json5 key llm.cache.semantic). Default OFF:
-	// opt-in per docs/agents/opt-in-defaults.md -- no embedder call, no
-	// vector math, byte-identical client behavior when disabled.
+	// leaf 02, Contract C4; json5 key llm.cache.semantic). Default ON
+	// since the audit-P4 owner ruling (2026-11-27; opt-out documented
+	// in docs/agents/opt-in-defaults.md) -- but behaviorally inert on
+	// default installs: with no embedder resolving, buildSemanticCacheTier
+	// degrades to exact-only, and an explicit enabled=false keeps the
+	// tier's code path structurally unreachable (byte-identical client
+	// behavior).
 	Semantic SemanticCacheConfig `json:"semantic"        toml:"semantic"`
 }
 
@@ -1445,10 +1449,13 @@ type LLMSimpleFeatureConfig struct {
 // workloads, and agent traffic (tool calls, code, one-operand differences)
 // is exactly where loose thresholds produce wrong answers.
 type SemanticCacheConfig struct {
-	// Enabled turns the tier on. Default FALSE (opt-in per
-	// docs/agents/opt-in-defaults.md): when false the client's code path
-	// is structurally unreachable -- no embedder call, no vector math,
-	// byte-identical responses.
+	// Enabled turns the tier on. Default TRUE since the audit-P4 owner
+	// ruling (2026-11-27; opt-out per docs/agents/opt-in-defaults.md):
+	// Load unmarshals user config onto DefaultConfig, so an absent key
+	// means on and an explicit false still wins. When false the client's
+	// code path is structurally unreachable -- no embedder call, no
+	// vector math, byte-identical responses. With true but no resolvable
+	// embedder the tier degrades to exact-only (never an error).
 	Enabled bool `json:"enabled"        toml:"enabled"`
 	// Threshold is the cosine similarity floor for serving a cached
 	// response. Default 0.95 (research addendum; supersedes C4's 0.92).
@@ -4556,13 +4563,19 @@ func DefaultConfig() *Config {
 			},
 			Cache: LLMSimpleFeatureConfig{
 				Semantic: SemanticCacheConfig{
-					// Default OFF (llm-serving-tiers leaf 02,
-					// Contract C4): opt-in per
-					// docs/agents/opt-in-defaults.md. Threshold
-					// 0.95 per the R0 research addendum
-					// (supersedes C4's 0.92) but consulted only
-					// when Enabled flips on.
-					Enabled:    false,
+					// Default ON since the audit-P4 owner ruling
+					// (2026-11-27): an absent key means true because
+					// Load unmarshals onto DefaultConfig; an
+					// explicit enabled=false still wins (opt-out
+					// per docs/agents/opt-in-defaults.md). Safe
+					// by construction: with no embedder resolving
+					// the tier degrades to exact-only (structurally
+					// dead cache, never an error), and exact-key
+					// serving is itself gated on
+					// llm.cache.enabled. Threshold 0.95 per the R0
+					// research addendum (supersedes C4's 0.92),
+					// consulted only while Enabled.
+					Enabled:    true,
 					Threshold:  DefaultSemanticCacheThreshold,
 					MaxEntries: DefaultSemanticCacheMaxEntries,
 					TTLMin:     0, // mirrors llm.cache.default_ttl_min at wiring

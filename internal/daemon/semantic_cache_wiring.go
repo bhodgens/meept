@@ -14,8 +14,12 @@ package daemon
 // Degradation posture (identical to the token-cache posture): embedder
 // resolution failure or a missing embedder logs a Warn and the client
 // stays exact-only -- the tier is never armed and startup is NEVER
-// blocked. Disabled (the opt-in default) means this code path returns nil
-// before touching any embedder: byte-identical client behavior.
+// blocked. Disabled (explicit llm.cache.semantic.enabled=false) means
+// this code path returns nil before touching any embedder:
+// byte-identical client behavior. The shipped default is ENABLED
+// (audit-P4 owner ruling 2026-11-27): with the default config no
+// embedder resolves, so the tier degrades to exact-only and behavior
+// matches the old opt-off posture at zero cost.
 
 import (
 	"context"
