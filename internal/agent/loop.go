@@ -651,15 +651,21 @@ type AgentConfig struct {
 	// Escape hatch for audits that genuinely need every package's
 	// invariant doc in every turn's prompt.
 	AgentsContextWholeTree bool
-	// SkillContextEagerBodies restores the pre-#193-increment-2 eager
-	// skill injection: up to 3 matched skills load their FULL bodies into
-	// the system prompt (bounded by MaxSkillContextTokens). The zero
-	// value (false) ships the index-only posture instead — surfaced
+	// SkillContextIndexOnly flips the eager skill-injection default OFF
+	// (bughunt H5/A-3, 2026-11-27): the DEFAULT posture loads up to 3
+	// matched skills' FULL bodies into the system prompt (bounded by
+	// MaxSkillContextTokens) — the pre-#193-increment-2 behavior. The
+	// #193 index-only default shipped prompts instructing the model to
+	// `file_read` each [load:] path, and every tier path lives OUTSIDE
+	// the per-session jail the fence now enforces by default (fence.go
+	// refuses out-of-root reads unconditionally) — the default prompt
+	// pointed at an action the tool layer denies. Setting this flag
+	// restores the index-only posture as an explicit opt-out: surfaced
 	// skills ride the prompt as name/description entries with the
-	// [load: file_read <SKILL.md path>] pointer, so the model pulls a
-	// body only when it actually needs one (issue #193: eager bodies were
-	// an unscoped ambient dump every step received).
-	SkillContextEagerBodies bool
+	// [load: file_read <SKILL.md path>] pointer. (Do not re-enable as a
+	// default without also admitting skill paths through the jail — the
+	// two defaults are coupled.)
+	SkillContextIndexOnly bool
 	// ArtifactContextWholeDoc restores the pre-#193-increment-2 verbatim
 	// CLAUDE.md dump: the seam-off path calls BuildFullArtifactContext
 	// with no bound. The zero value (false) routes every artifact-context
@@ -5301,11 +5307,20 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 		injectedNames = append(injectedNames, d.Entry.Name)
 	}
 
-	// Index-only posture (default, issue #193 increment 2): surfaced
-	// skills ride the prompt as metadata entries with a load pointer;
-	// no bodies are read. AgentConfig.SkillContextEagerBodies restores
-	// the eager-body behavior below as an explicit escape hatch.
-	if !l.config.SkillContextEagerBodies {
+	// Bughunt H5/A-3 (2026-11-27) — DEFAULT posture is now EAGER BODIES
+	// (the flag inverted to SkillContextIndexOnly). The former index-only
+	// default surfaced skills as name/description entries pointing at
+	// `file_read [load:]` paths, and every skills.DefaultTiers() path
+	// lives OUTSIDE the per-session jail the fence enforces by default
+	// (internal/security/fence.go refuses out-of-root reads
+	// unconditionally) — the default prompt instructed an action the
+	// tool layer denies. Eager bodies (bounded by MaxSkillContextTokens)
+	// remove the out-of-jail read from the default path entirely.
+	// SkillContextIndexOnly restores the index-only posture as an
+	// explicit opt-out for deployments that admitted skill paths through
+	// the jail or run fence-disabled. Postures are coupled to the fence
+	// default: do not flip one back without auditing the other.
+	if l.config.SkillContextIndexOnly {
 		var sb strings.Builder
 		sb.WriteString("## Relevant Skills\n\n")
 		sb.WriteString("The following skills are relevant to this request. Their bodies are NOT loaded; ")

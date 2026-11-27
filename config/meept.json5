@@ -895,7 +895,16 @@
     },
   },
 
-  // Skills configuration
+  // Skills context posture (bughunt H5, 2026-11-27): the model-facing
+  // skill injection is EAGER BY DEFAULT — up to 3 matched skills' full
+  // bodies ride the system prompt (bounded by agent.max_skill_context_
+  // tokens). The former index-only default pointed file_read at
+  // [load:] paths OUTSIDE the per-session fence jail (refused
+  // unconditionally since fence_enabled defaulted on). There is no
+  // user-facing config key: the index-only posture remains available
+  // as an agent-level opt-out (AgentConfig.SkillContextIndexOnly) for
+  // deployments that admit skill paths through the jail. Do not flip
+  // the default back without auditing the fence jail coupling.
   "skills": {
     "enabled": true,
     "search_paths": [],

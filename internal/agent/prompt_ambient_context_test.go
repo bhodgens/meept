@@ -217,11 +217,13 @@ func writeSkillFixture(t *testing.T) (*skills.LazySkillLoader, *skills.SkillInde
 	return skills.NewLazySkillLoader(idx), entry
 }
 
-// TestSkillContextIndexOnlyDefault pins the #193 increment-2 default
-// posture: a surfaced skill rides the prompt as an index entry with the
-// [load: file_read <path>] pointer and its body is NEVER read from the
-// loader (zero Loads in loader stats proves the eager dump is gone).
-func TestSkillContextIndexOnlyDefault(t *testing.T) {
+// TestSkillContextEagerBodiesDefault pins the H5 flipped default
+// (bughunt 2026-11-27): a DEFAULT-config loop reads full bodies into the
+// prompt (the #193 index-only default pointed file_read at paths the
+// per-session jail refuses — the posture and the fence were coupled).
+// The index-only shape is pinned as the explicit opt-out in
+// TestSkillContextIndexOnlyOptOut below.
+func TestSkillContextEagerBodiesDefault(t *testing.T) {
 	loader, entry := writeSkillFixture(t)
 	loop := NewAgentLoop("skill-index-session", "/tmp",
 		WithAgentConfig(DefaultAgentConfig()),
@@ -234,24 +236,57 @@ func TestSkillContextIndexOnlyDefault(t *testing.T) {
 
 	section := loop.buildSkillContextSection(context.Background(), discovered)
 	if section == "" {
-		t.Fatal("index-only posture must still surface the skill")
+		t.Fatal("default posture must surface the skill")
+	}
+	if !strings.Contains(section, "EAGER SKILL BODY MARKER") {
+		t.Errorf("default posture must carry the full skill body, got %q", tail(section, "Relevant Skills"))
+	}
+	if stats := loader.Stats(); stats.Loads == 0 {
+		t.Errorf("default posture must read the body via the loader: Loads=%d", stats.Loads)
+	}
+}
+
+// TestSkillContextEagerBodiesEscapeHatch pins the eager-body DEFAULT
+// (bughunt H5, 2026-11-27): the default config reads full bodies and the
+// prompt carries them — exactly as pre-#193-increment-2. (Renamed from
+// the old opt-in pin when the default flipped: this is now the default-
+// TestSkillContextIndexOnlyOptOut pins the H5 escape hatch in BOTH
+// directions: with AgentConfig.SkillContextIndexOnly set, surfaced skills
+// ride the prompt as index entries with the [load:] pointer and the loader
+// NEVER reads a body (the #193 increment-2 posture, now opt-in-only). The
+// telemetry end-to-end half of the old index-only pin rides along: the
+// section classifies under the "skills" kind either posture.
+func TestSkillContextIndexOnlyOptOut(t *testing.T) {
+	loader, entry := writeSkillFixture(t)
+	cfg := DefaultAgentConfig()
+	cfg.SkillContextIndexOnly = true
+	loop := NewAgentLoop("skill-index-optout", "/tmp",
+		WithAgentConfig(cfg),
+		WithSkillLoader(loader),
+	)
+	if loop == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+	discovered := []*DiscoveredSkill{{Entry: entry, Confidence: 0.9}}
+
+	section := loop.buildSkillContextSection(context.Background(), discovered)
+	if section == "" {
+		t.Fatal("index-only opt-out must still surface the skill")
 	}
 	if strings.Contains(section, "EAGER SKILL BODY MARKER") {
-		t.Errorf("default posture leaked a full skill body into the prompt: %q", tail(section, "EAGER"))
+		t.Errorf("index-only opt-out leaked a full skill body: %q", tail(section, "EAGER"))
 	}
 	pointer := "[load: file_read " + entry.Path + "]"
 	if !strings.Contains(section, pointer) {
 		t.Errorf("index entry must carry the load pointer %q, got %q", pointer, section)
 	}
-	if !strings.Contains(section, entry.Name) || !strings.Contains(section, entry.Description) {
-		t.Errorf("index entry must carry name + description, got %q", section)
-	}
 	if stats := loader.Stats(); stats.Loads != 0 {
-		t.Errorf("index-only posture must not read bodies: loader Loads=%d", stats.Loads)
+		t.Errorf("index-only opt-out must not read bodies: loader Loads=%d", stats.Loads)
 	}
 
-	// End-to-end: the section rides the assembled prompt and telemetry
-	// classifies it under the "skills" kind (#193 increment 2 taxonomy).
+	// End-to-end (carried from the old index-only pin): the section rides
+	// the assembled prompt and telemetry classifies it under the
+	// "skills" kind (#193 increment 2 taxonomy).
 	rec := &fakeTurnMetricRecorder{}
 	loop.SetPromptSectionRecorder(rec)
 	conv := NewConversation()
@@ -268,31 +303,6 @@ func TestSkillContextIndexOnlyDefault(t *testing.T) {
 	}
 	if !haveSkills || skillsBytes <= 0 {
 		t.Errorf("expected nonzero 'skills' section telemetry record, got present=%v bytes=%v", haveSkills, skillsBytes)
-	}
-}
-
-// TestSkillContextEagerBodiesEscapeHatch pins the opt-in restore: with
-// AgentConfig.SkillContextEagerBodies the loader reads full bodies and
-// the prompt carries them, exactly as pre-increment-2.
-func TestSkillContextEagerBodiesEscapeHatch(t *testing.T) {
-	loader, entry := writeSkillFixture(t)
-	cfg := DefaultAgentConfig()
-	cfg.SkillContextEagerBodies = true
-	loop := NewAgentLoop("skill-eager-session", "/tmp",
-		WithAgentConfig(cfg),
-		WithSkillLoader(loader),
-	)
-	if loop == nil {
-		t.Fatal("NewAgentLoop returned nil")
-	}
-	discovered := []*DiscoveredSkill{{Entry: entry, Confidence: 0.9}}
-
-	section := loop.buildSkillContextSection(context.Background(), discovered)
-	if !strings.Contains(section, "EAGER SKILL BODY MARKER") {
-		t.Errorf("escape hatch must restore eager bodies, got %q", section)
-	}
-	if stats := loader.Stats(); stats.Loads == 0 {
-		t.Errorf("escape hatch must read the body via the loader: Loads=%d", stats.Loads)
 	}
 }
 

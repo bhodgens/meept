@@ -124,11 +124,18 @@ When `compaction.enabled` is true and utilization exceeds `trigger_ratio`, the `
 - Ambient AGENTS.md injection is chain-scoped (project root -> session
   working dir, 8KB cap, issue #193); `AgentConfig.AgentsContextWholeTree`
   restores the legacy whole-tree walk as an explicit escape hatch.
-- Eager skill bodies are OFF by default (issue #193 increment 2):
-  surfaced skills ride the prompt as index entries with the
-  `[load: file_read <SKILL.md path>]` pointer and their bodies are never
-  read per turn; `AgentConfig.SkillContextEagerBodies` restores the
-  pre-change behavior (up to 3 full bodies under `MaxSkillContextTokens`).
+- Eager skill bodies are ON by default (bughunt H5, 2026-11-27 — the
+  posture was RE-FLIPPED from the #193 index-only default): surfaced
+  skills ride the prompt with full bodies (up to 3, bounded by
+  `MaxSkillContextTokens`). The index-only default was reverted because
+  its `[load: file_read <SKILL.md path>]` pointers name paths OUTSIDE
+  the per-session fence jail (refused unconditionally since
+  `fence_enabled` shipped default-on) — the default prompt instructed
+  an action the tool layer denies.
+  `AgentConfig.SkillContextIndexOnly` restores the index-only posture
+  as an explicit opt-out (index entries + load pointers, no bodies).
+  The two defaults are coupled: do not flip one back without auditing
+  the fence jail (docs/agents/invariants.md, fence section).
 - CLAUDE.md is no longer dumped verbatim on the default path (issue #193
   increment 2): the artifact-context section always goes through
   `BuildFullArtifactContextBudgeted` — the allocator's
