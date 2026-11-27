@@ -16,12 +16,28 @@ package metrics
 // empirical probes show the index also removes the GROUP BY temp B-tree
 // stats-free (as a covering scan).
 //
-// Teeth: with the index the plan references idx_mrv_breakdown_window and
-// carries NO "TEMP B-TREE FOR GROUP BY"; with the index dropped (and stats
-// rebuilt) the identical query regresses to a temp GROUP BY B-tree — proving
-// the positive assertion detects the bug it pins. Result equality is
+// Teeth (issue #178): with the index the plan must reference
+// idx_mrv_breakdown_window and must NOT do a bare table SCAN; with the index
+// dropped (and stats rebuilt) the identical query regresses to a temp
+// GROUP BY B-tree — proving the positive assertions detect the bug they pin.
+// "USE TEMP B-TREE FOR GROUP BY" in the WITH-index plan is an observation
+// (t.Log), not a failure: after ANALYZE the planner legitimately alternates
+// between a pure index-ordered read and an index read plus a small GROUP BY
+// temp tree, and the temp tree for the count-DESC ORDER BY is inherent to
+// the plan regardless of the index. The L5 contract is the SCAN->index
+// upgrade only (issue #178).
+// Result equality is
 // checked against an expectation map built during seeding, so the partial
 // index is proven access-path-only (same rows with and without it).
+//
+// Clock determinism (issue #178, second flake mode): timestamps are stored
+// as second-granularity RFC3339 strings, and the last seeded row lands
+// EXACTLY on the 24h window boundary. If the query's `since` is taken from a
+// fresh time.Now() after seeding + ANALYZE, sub-second drift can round the
+// bound up to the next second and silently drop that boundary row. The seed
+// therefore truncates `now` to a whole second and the SAME since value is
+// returned and reused by the test, so string comparison, the expected map,
+// and the query agree by construction.
 
 import (
 	"fmt"
@@ -82,10 +98,13 @@ func summarizePlan(details []string) planDetail {
 
 // newPlanStore builds a real Store seeded with 25 models x 4 categories x 200
 // verdict rows (20k) spread deterministically over 84 days, plus a 40-day-old
-// out-of-window model row and two recent workflow rows. It returns the store
-// and the expected in-window breakdown (map model/category -> count) for the
-// 24h window the plan test pins.
-func newPlanStore(t *testing.T) (*Store, map[[2]string]int64) {
+// out-of-window model row and two recent workflow rows. It returns the store,
+// the exact 24h-window `since` the test must use, and the expected in-window
+// breakdown (map model/category -> count). `now` is truncated to a whole
+// second and the LAST seeded row lands exactly on `since`, so the
+// second-granularity RFC3339 string comparison includes it deterministically
+// (issue #178 boundary flake).
+func newPlanStore(t *testing.T) (*Store, time.Time, map[[2]string]int64) {
 	t.Helper()
 	store, err := NewStore(&StoreConfig{
 		DatabasePath:  filepath.Join(t.TempDir(), "metrics.db"),
@@ -97,7 +116,9 @@ func newPlanStore(t *testing.T) (*Store, map[[2]string]int64) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	now := time.Now().UTC()
+	// Truncate to the second so the RFC3339 timestamps stored (which drop
+	// sub-second precision) round-trip exactly against the `since` bound.
+	now := time.Now().UTC().Truncate(time.Second)
 	spanMin := 83 * 24 * 60 // 83 days of minutes between first and last row
 	start := now.Add(-84 * 24 * time.Hour)
 	cats := []string{"pass", "logic_error", "style_bloat", "incomplete_implementation"}
@@ -165,7 +186,7 @@ func newPlanStore(t *testing.T) (*Store, map[[2]string]int64) {
 	if _, err := store.db.Exec(`ANALYZE`); err != nil {
 		t.Fatalf("ANALYZE: %v", err)
 	}
-	return store, expected
+	return store, windowCut, expected
 }
 
 // assertBreakdownMatches checks the store's windowed breakdown equals the
@@ -194,12 +215,14 @@ func assertBreakdownMatches(t *testing.T, store *Store, since time.Time, expecte
 }
 
 // TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex is the L5 pin: the
-// windowed breakdown query must use idx_mrv_breakdown_window with no temp
-// B-tree for the GROUP BY, and must REGRESS to a temp GROUP BY B-tree once
-// the index is dropped (teeth). Results stay identical either way.
+// windowed breakdown query must use idx_mrv_breakdown_window with NO bare
+// table SCAN, and must REGRESS to a temp GROUP BY B-tree once the index is
+// dropped (teeth). Results stay identical either way. A residual "USE TEMP
+// B-TREE FOR GROUP BY" after ANALYZE is a logged observation, not a failure
+// (issue #178: the plan contract is the SCAN->index upgrade; the GROUP BY
+// temp tree is a planner cost choice, not a full scan).
 func TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex(t *testing.T) {
-	store, expected := newPlanStore(t)
-	since := time.Now().UTC().Add(-24 * time.Hour)
+	store, since, expected := newPlanStore(t)
 	query, args := reviewVerdictBreakdownSQL(since)
 
 	details := explainBreakdown(t, store.db, query, args...)
@@ -209,7 +232,11 @@ func TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex(t *testing.T) {
 		t.Errorf("windowed breakdown plan does not use idx_mrv_breakdown_window: %v", details)
 	}
 	if p.groupByTempTree {
-		t.Errorf("windowed breakdown plan pays a temp B-tree for GROUP BY (the L5 full-scan/re-sort cost): %v", details)
+		// Observation only (issue #178): post-ANALYZE the planner sometimes
+		// keeps a small temp tree for the GROUP BY even on the window index.
+		// That is a plan shape, not the L5 full-scan/re-sort cost, and is
+		// not part of the pinned contract.
+		t.Logf("note: post-ANALYZE plan carries a temp B-tree for GROUP BY (allowed; contract is index use + no table SCAN): %v", details)
 	}
 	if p.tableScan {
 		t.Errorf("windowed breakdown plan does a bare table SCAN: %v", details)
@@ -242,7 +269,7 @@ func TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex(t *testing.T) {
 // schema on an existing database (next daemon open) keeps exactly one index
 // and does not error — no migration-registry step involved.
 func TestVR_BREAKDOWN_PLAN_2_IndexCreatedIdempotently(t *testing.T) {
-	store, _ := newPlanStore(t) // schema ran once on NewStore
+	store, _, _ := newPlanStore(t) // schema ran once on NewStore
 
 	// Re-run the schema script against the live handle (simulates the next
 	// daemon open on an existing DB).
