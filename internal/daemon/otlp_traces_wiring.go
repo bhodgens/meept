@@ -213,6 +213,15 @@ func wireOTLPTracesWithObserver(cfg config.OTLPTracesConfig, b *bus.MessageBus, 
 				Error:          ev.Error,
 				DurationMS:     ev.DurationMS,
 				TraceID:        ev.TraceID,
+				// TurnSpanID is load-bearing, not decoration: it is the
+				// chat.turn span's own OTLP span id, and it is the id every
+				// llm.call hop span of the turn names as parent_span_id
+				// (read from the same map above). Omitting it left the
+				// exporter to random-fill chat.turn's span id
+				// (otlp_trace_exporter.go), so the parent id on every hop
+				// matched NO exported span and the receiver (Langfuse et
+				// al.) rendered an orphaned tree per hop. bughunt 2026-11-25 A1-6.
+				TurnSpanID: ev.TurnSpanID,
 			})
 		})
 		subs.subs = append(subs.subs, turnSub)
