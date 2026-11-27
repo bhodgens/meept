@@ -34,6 +34,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
@@ -91,6 +92,14 @@ type GroupsHandler struct {
 	registry *agent.AgentRegistry
 	users    *auth.Store // nil when multi-user is disabled
 	audit    *auditlog.Store
+	// mu guards the shared live config's group table (policies +
+	// bindings) across concurrent assign/remove RPC calls: one goroutine
+	// per connection, and saveConfigAtomic marshals the same live struct —
+	// without it a concurrent mutation tears the slice mid-save.
+	// The lock is held for the whole copy-then-swap + persist window so a
+	// concurrent reader (list/explain/other mutation) never observes a
+	// half-built bindings list.
+	mu sync.Mutex
 	// auditRefusal logs denied mutation attempts at debug when non-nil.
 	auditRefusal func(action, reason string)
 	// knownTools is the live registry tool-name set for C6 validation
@@ -204,10 +213,16 @@ func (h *GroupsHandler) RegisterGroupsMethods(server *Server) {
 }
 
 // groupsPolicies returns the handler's policy table as model rows.
+// Read under mu for the whole iteration (issue #183): applyPolicyBinding
+// upserts g.Policies IN PLACE, so an early unlock here would let a
+// concurrent groups.assign mutate an element while this loop reads it.
+// No I/O happens under this lock (AGENTS.md mutex-IO rule).
 func (h *GroupsHandler) groupsPolicies() []groups.Policy {
 	if h.cfg == nil {
 		return nil
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	g := h.cfg.Security.Groups
 	out := make([]groups.Policy, 0, len(g.Policies))
 	for _, p := range g.Policies {
@@ -225,10 +240,15 @@ func (h *GroupsHandler) groupsPolicies() []groups.Policy {
 }
 
 // groupsBindings returns the handler's binding table as model rows.
+// Read under mu for the whole iteration (issue #183), same reason as
+// groupsPolicies: the header copy must not race applyPolicyBinding's
+// swap of g.Bindings.
 func (h *GroupsHandler) groupsBindings() []groups.Binding {
 	if h.cfg == nil {
 		return nil
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	g := h.cfg.Security.Groups
 	out := make([]groups.Binding, 0, len(g.Bindings))
 	for _, b := range g.Bindings {
@@ -518,7 +538,13 @@ func (h *GroupsHandler) handleAssign(ctx context.Context, params json.RawMessage
 		return nil, fmt.Errorf("groups.assign: %w", err)
 	}
 	h.emitAudit(ctx, "groups.assign", subject, policyName)
-	return map[string]any{"assigned": true, "subject": subject, "policy": policyName}, nil
+	return map[string]any{
+		"assigned":             true,
+		"subject":              subject,
+		"policy":               policyName,
+		"effective_at_restart": true,
+		"note":                 "existing sessions keep boot-time enforcement until restart",
+	}, nil
 }
 
 // handleRemove removes a membership: the subject's binding for the named
@@ -577,7 +603,13 @@ func (h *GroupsHandler) handleRemove(ctx context.Context, params json.RawMessage
 		return nil, fmt.Errorf("groups.remove: %w", err)
 	}
 	h.emitAudit(ctx, "groups.remove", subject, policyName)
-	return map[string]any{"removed": true, "subject": subject, "policy": policyName}, nil
+	return map[string]any{
+		"removed":              true,
+		"subject":              subject,
+		"policy":               policyName,
+		"effective_at_restart": true,
+		"note":                 "existing sessions keep boot-time enforcement until restart",
+	}, nil
 }
 
 // labelMembership extracts requested group LABELS (C4 lane). Only present
@@ -628,6 +660,8 @@ func (h *GroupsHandler) agentDefinitionPath(id string) (string, bool) {
 // for policyName (or all its bindings when empty). Unknown policy on
 // assign is an error (dangling bindings fail boot validation).
 func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *groups.Policy, scope string, assign bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	g := &h.cfg.Security.Groups
 
 	// Policy upsert (assign with a policy object only).
@@ -684,15 +718,26 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 				return nil
 			}
 		}
-		g.Bindings = append(g.Bindings, config.GroupsBindingConfig{
+		// Copy-then-swap (issue #183): build a NEW slice rather than
+		// appending in place so a concurrent reader never sees a
+		// half-built list; the swap is a single pointer write under the
+		// mutex.
+		next := make([]config.GroupsBindingConfig, 0, len(g.Bindings)+1)
+		next = append(next, g.Bindings...)
+		next = append(next, config.GroupsBindingConfig{
 			Subject: subject,
 			Policy:  policyName,
 			Scope:   scope,
 		})
+		g.Bindings = next
 	} else {
-		kept := g.Bindings[:0]
+		// Copy-then-swap (issue #183): filter a copy rather than
+		// in-place (kept := g.Bindings[:0] aliasing) so the old slice
+		// stays intact for any reader that already holds it.
+		copies := append([]config.GroupsBindingConfig(nil), g.Bindings...)
+		kept := make([]config.GroupsBindingConfig, 0, len(copies))
 		removed := 0
-		for _, b := range g.Bindings {
+		for _, b := range copies {
 			match := b.Subject == subject && (policyName == "" || b.Policy == policyName)
 			if match {
 				removed++
@@ -708,7 +753,9 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 
 	// Persist (F3 legacy call shape rides this path too; cfgPath empty
 	// keeps the mutation in-memory only — tests construct handlers
-	// without a config path).
+	// without a config path). Held under the mutex so a concurrent
+	// reader (saveConfigAtomic marshals the whole live config) never
+	// observes a half-built list.
 	if h.cfgPath != "" {
 		if err := saveConfigAtomic(h.cfgPath, h.cfg); err != nil {
 			return fmt.Errorf("persist groups config: %w", err)
@@ -748,6 +795,8 @@ func (h *GroupsHandler) amendPolicyFSRoots(policyName string, roots []string, ad
 	if h.cfg == nil {
 		return 0, fmt.Errorf("config not available")
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	g := &h.cfg.Security.Groups
 	idx := -1
 	for i := range g.Policies {
