@@ -444,37 +444,58 @@ func tokenizeCommand(cmd string) []string {
 	return tokens
 }
 
-// extractPathFromToken checks whether a token looks like a file path and
-// returns the path if so. Returns "" for non-path tokens (flags, env vars,
-// command names without path separators).
+// extractPathFromToken checks whether a token carries a file path and
+// returns the path if so. Returns "" for non-path tokens (bare flags,
+// env vars, command names without path separators).
+//
+// Issue #179 (M18 consume-side gap): the previous version dropped every
+// KEY=VALUE token and every -flag token outright, so a path riding inside
+// an env-assignment argument — BASH_ENV=/tmp/evil.sh — or a flag value —
+// --out=/etc/shadow — bypassed fence path validation entirely while the
+// scheduler's M18 guard source (shellGuardSourceWithEnv) fed the same
+// string to the raw substitution checks. Assignment-shaped tokens are now
+// split on the FIRST '=' and the value side is classified with the same
+// path-like rule as a bare token; bare names, plain flags (no '='), and
+// non-path values (FOO=bar, N=5, --color=auto) stay "" — behavior-identical
+// to before.
 func extractPathFromToken(tok string) string {
 	if tok == "" {
 		return ""
 	}
 
-	// Skip flags (-f, --verbose)
-	if strings.HasPrefix(tok, "-") {
+	// Split off the value side of assignment-shaped tokens: env-style
+	// KEY=VALUE and flag=value (--out=/path, -o=/path). Tokens that already
+	// start with "/" or "~" keep their whole form (legacy byte-identical:
+	// "/k=v" was always returned as-is) and so do bare "=" forms. Leading
+	// quote residue is trimmed so FOO='/etc/passwd' still exposes the path.
+	value := tok
+	if !strings.HasPrefix(tok, "/") && !strings.HasPrefix(tok, "~") {
+		if idx := strings.IndexByte(tok, '='); idx >= 0 {
+			value = strings.TrimLeft(tok[idx+1:], "\"'")
+		}
+	}
+	if value == "" {
 		return ""
 	}
 
-	// Skip env variable assignments (FOO=bar)
-	if strings.Contains(tok, "=") && !strings.HasPrefix(tok, "/") && !strings.HasPrefix(tok, "~") {
+	// Skip bare flags (-f, --verbose) — no value part to inspect.
+	if strings.HasPrefix(value, "-") {
 		return ""
 	}
 
 	// Skip single-token command names with no path component
 	// Absolute (/...), home (~...), parent-traversal (..), or explicit
-	// relative (./...) tokens are path-like.
-	isPathLike := strings.HasPrefix(tok, "/") ||
-		strings.HasPrefix(tok, "~") ||
-		strings.Contains(tok, "..") ||
-		strings.HasPrefix(tok, "./")
+	// relative (./...) values are path-like.
+	isPathLike := strings.HasPrefix(value, "/") ||
+		strings.HasPrefix(value, "~") ||
+		strings.Contains(value, "..") ||
+		strings.HasPrefix(value, "./")
 
 	if !isPathLike {
 		return ""
 	}
 
-	return tok
+	return value
 }
 
 // IsNoFence returns true if fencing is disabled.
