@@ -65,6 +65,24 @@ type PlanManager struct {
 	phaseTaskMap map[string]string // taskID -> phaseID, populated during Synthesize
 	taskPlanMap  map[string]string // taskID -> planID, populated during Synthesize
 
+	// execMu guards planExecResumer (issue #177 owner ruling B). It sits
+	// under its OWN mutex, not m.mu: m.mu is held across Synthesize/
+	// EnsureTaskPlan map writes whose chains reach publishPlanState, and
+	// the resumer call site must never hold a lock across its I/O
+	// (mutexio). The setter runs at daemon wiring time; reads happen on
+	// approve goroutines.
+	execMu sync.RWMutex
+	// planExecResumer is the daemon-wired execution half for a quick-plan
+	// tagged contract released by an OPERATOR approve: given the approved
+	// plan id it must mint the strategic task (the dispatcher's
+	// createTask), bind it with AdoptTask (row -> executing), and hand the
+	// task to the orchestrator pipeline. Set via SetPlanExecutionResumer
+	// (nil-guarded setter; the daemon is the only wiring site). nil = no
+	// resumer: the tagged row STAYS approved (never zero-phase-completed)
+	// so a later re-drive or manual adopt can still run the brief —
+	// honest degradation, the same posture family as C-5/D5.
+	planExecResumer func(ctx context.Context, planID string) error
+
 	// kanbanEvents is the opt-in gate (plan leaf 02/04) for the typed
 	// kanban.event.plan.state StateEvent publishers on the plan state
 	// machine's transition paths. Default false = no publish at all =
@@ -666,6 +684,14 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 	})
 
 	m.logger.Info("plan approved", "plan_id", planID, "by", by)
+
+	// Ruling B branch (checked AFTER the approval commits so a racer's
+	// state is read fresh): a tagged, task-less quick_plan contract routes
+	// to execution, never to the zero-phase completion trap.
+	if fresh, err := m.store.GetPlan(ctx, planID); err == nil && fresh.Kind == QuickPlanKind && fresh.TaskID == "" {
+		m.resumeQuickPlanExecution(ctx, fresh)
+		return nil
+	}
 
 	// Synthesis is best-effort once approval is committed. A failure here must
 	// not fail the operator approve RPC or roll back the CAS, signoff, or
@@ -1401,6 +1427,82 @@ func (m *PlanManager) approveNoSynthesis(ctx context.Context, planID, sessionID,
 	return nil
 }
 
+// SetPlanExecutionResumer wires the daemon-side execution half for
+// operator-approved quick-plan contracts (issue #177 ruling B). Nil-guarded
+// per the setter convention: a nil argument leaves the previous resumer
+// untouched and never panics; an unwired manager degrades to "stays
+// approved, never completed" (ApprovePlan's tagged branch). The resumer
+// runs on its OWN bounded goroutine (see resumeQuickPlanExecution), so the
+// approve RPC replies as soon as the approval commits.
+func (m *PlanManager) SetPlanExecutionResumer(fn func(ctx context.Context, planID string) error) {
+	m.execMu.Lock()
+	defer m.execMu.Unlock()
+	if fn != nil {
+		m.planExecResumer = fn
+	}
+}
+
+// ApprovePlanForExecution is the ruling-B approve primitive: the exact
+// ApprovePlan CAS/signoff/columns/event sequence (via approveNoSynthesis)
+// with NO Synthesize tail and NO resumer dispatch — the caller owns the
+// execution half (the daemon resumer calls createTask + AdoptTask after
+// it). An already-approved row returns nil (crash re-drive); any other
+// state is refused by approveNoSynthesis's transition CAS. ApprovePlan's
+// tagged branch is this same sequence followed by the resumer dispatch;
+// the method exists so an execution-driving caller never re-enters
+// ApprovePlan through the resumer.
+func (m *PlanManager) ApprovePlanForExecution(ctx context.Context, planID, by, sessionID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("approve for execution: %w", err)
+	}
+	switch plan.State {
+	case StateApproved, StateExecuting:
+		return nil // re-drive: the approve half (or an adopt) already committed
+	case StatePendingApproval:
+		// straight through
+	default:
+		return fmt.Errorf("%w: plan %s is in state %s, ApprovePlanForExecution needs pending_approval/approved", ErrPlanNotModifiable, planID, plan.State)
+	}
+	return m.approveNoSynthesis(ctx, planID, sessionID, by)
+}
+
+// resumeQuickPlanExecution runs the ruling-B execution half for an
+// approved, unbound, quick-plan-tagged row (called from ApprovePlan's
+// tagged branch, after the approval committed). Posture mirrors the
+// Synthesize tail's best-effort contract: the approve RPC never fails and
+// the CAS/signoff/columns never roll back because of the execution half.
+//
+//   - Resumer wired: invoke it (createTask + AdoptTask + orchestrator
+//     dispatch happen there). A failure is logged; the row stays approved
+//     and unbound, re-drivable.
+//   - No resumer: the row STAYS approved. Synthesize is never called —
+//     that is the ruling (its zero-phase guard is the bug). The reclaimer
+//     kind-skip keeps the row out of every silent expansion path, so the
+//     brief waits honestly for an execution driver instead of lying about
+//     completion.
+func (m *PlanManager) resumeQuickPlanExecution(ctx context.Context, p *Plan) {
+	m.execMu.RLock()
+	resumer := m.planExecResumer
+	m.execMu.RUnlock()
+	if resumer == nil {
+		m.logger.Info("quick_plan contract approved without an execution resumer: row stays approved unbound (ruling B — never zero-phase-completed)",
+			"plan_id", p.ID)
+		return
+	}
+	// Detach from the approve RPC's context (the operator may disconnect as
+	// soon as the approve replies) but bound the resumer so a wedged task
+	// store cannot leak a goroutine forever.
+	gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	go func() {
+		defer cancel()
+		if err := resumer(gctx, p.ID); err != nil {
+			m.logger.Error("quick_plan approve execution resumer failed; row stays approved for re-drive",
+				"plan_id", p.ID, "error", err)
+		}
+	}()
+}
+
 // ErrTaskAlreadyBound reports that the plan already carries a DIFFERENT
 // task; the adopter's task must not replace it.
 var ErrTaskAlreadyBound = errors.New("plan already bound to a different task")
@@ -1583,6 +1685,20 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) (retErr err
 	if plan.TaskID != "" {
 		m.logger.Info("synthesize: plan already has task, skipping",
 			"plan_id", planID, "task_id", plan.TaskID)
+		return nil
+	}
+
+	// Ruling B (issue #177): a quick-plan-tagged row NEVER runs the
+	// synthesis tail. Its decomposition lives in the strategic planner
+	// task the approve resumer adopts (SubmitAndApproveNoSynthesis's
+	// contract, extended to the operator approve path); Synthesize here
+	// would hit the zero-phase guard below and COMPLETE the brief without
+	// executing it — the exact lie the ruling forbids. Every caller
+	// (ApprovePlan's non-tagged tail, the reclaimer's kind-skip) keeps the
+	// tagged row out of this method; the guard is the last line.
+	if plan.Kind == QuickPlanKind {
+		m.logger.Info("synthesize: quick_plan-tagged contract refuses synthesis (ruling B: approve resumer owns execution)",
+			"plan_id", planID)
 		return nil
 	}
 

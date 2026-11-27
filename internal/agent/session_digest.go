@@ -388,5 +388,9 @@ func (d *Dispatcher) PlanDigestContext(sessionID, excludeTaskID string) string {
 func (d *Dispatcher) SetPlanManager(pm *plan.PlanManager) {
 	if pm != nil {
 		d.planManager = pm
+		// Ruling B (issue #177): arming the approve-time execution resumer
+		// rides this exact wiring line the daemon already calls, so the
+		// seam is live without any daemon-side change.
+		d.wirePlanApproveResumer()
 	}
 }
