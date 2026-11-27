@@ -664,6 +664,16 @@ type SessionMessagesLoadedMsg struct {
 	Err       error
 }
 
+// DispatchTraceLoadedMsg carries the session's persisted dispatch rows
+// in arrival (oldest-first) order for async badge hydration (bughunt
+// 2026-11-24 M12 half B). Produced by ChatModel.dispatchTraceHydrateCmd
+// off the event loop; consumed by Update. Zero Rows is a soft failure
+// (RPC error or bad payload) and leaves bubbles unbadged.
+type DispatchTraceLoadedMsg struct {
+	SessionID string
+	Rows      []dispatchTraceRow
+}
+
 // SessionDescriptionUpdatedMsg signals a description update completed.
 type SessionDescriptionUpdatedMsg struct {
 	SessionID   string
@@ -1592,8 +1602,24 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.Err != nil || msg.SessionID != m.sessionID {
 			return nil
 		}
-		// Convert server messages to ChatMessages and populate state
-		m.loadServerMessages(msg.SessionID, msg.Messages)
+		// Convert server messages to ChatMessages and populate state.
+		// M12 half B: badge hydration now returns the dispatch_trace
+		// fetch as a cmd — Update schedules it, never blocks on it.
+		return m.loadServerMessages(msg.SessionID, msg.Messages)
+
+	case DispatchTraceLoadedMsg:
+		// M12: the async badge hydration landed. Apply the stamps to
+		// the restored transcript of that session (fail-soft: zero
+		// rows leaves bubbles unbadged).
+		saved, ok := m.sessionMessages[msg.SessionID]
+		if !ok || len(msg.Rows) == 0 {
+			return nil
+		}
+		m.applyRestoredClassifications(saved, msg.Rows)
+		if msg.SessionID == m.sessionID {
+			m.messages = saved
+			m.updateViewport()
+		}
 		return nil
 
 	case SessionDescriptionUpdatedMsg:
@@ -2621,8 +2647,11 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
-// loadServerMessages converts server messages and populates local state.
-func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.SessionMessage) {
+// loadServerMessages converts server messages and populates local
+// state. It returns the async badge-hydration fetch (M12 half B) so the
+// caller can schedule it as a tea.Cmd — never run RPC here (this lands
+// on the Update event loop; a sync RPC froze keypresses).
+func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.SessionMessage) tea.Cmd {
 	chatMsgs := make([]ChatMessage, 0, len(serverMsgs))
 	var history []string
 
@@ -2642,9 +2671,12 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 	}
 
 	// Restored transcripts carry no turn.terminal events, so the mode
-	// badge (F13c) needs the persisted dispatch rows: stamp them before
-	// the rebuild lands (06-planning/03).
-	m.hydrateRestoredClassifications(sessionID, chatMsgs)
+	// badge (F13c) needs the persisted dispatch rows (06-planning/03).
+	// M12 half B: the fetch now rides a tea.Cmd returned to Update
+	// instead of a synchronous RPC here on the event loop; the stamps
+	// land via DispatchTraceLoadedMsg. chatMsgs is stored below, so the
+	// delivered hydration applies to the same backing array.
+	hydrateCmd := m.dispatchTraceHydrateCmd(sessionID, chatMsgs)
 
 	m.sessionMessages[sessionID] = chatMsgs
 	if sessionID == m.sessionID {
@@ -2669,6 +2701,7 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 			m.history.Add(sessionID, h)
 		}
 	}
+	return hydrateCmd
 }
 
 func (m *ChatModel) updateViewport() {
