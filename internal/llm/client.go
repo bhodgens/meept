@@ -570,12 +570,33 @@ func (c *Client) semanticLookupBehindMiss(ctx context.Context, cfg *ModelConfig,
 // mutating it in place would corrupt the stored response for every later
 // reader. A nil response passes through nil (callers only reach this on a
 // hit, but the guard keeps the helper standalone-safe).
+//
+// The copy is DEEP over the mutable fields (bughunt 2026-11-24 P4). A plain
+// struct copy shares two things with the stored entry: the ToolCalls backing
+// array — an element write through the copy lands in the STORED entry, and an
+// append lands in the shared spare capacity, so the stored entry's elements
+// change while its len stays put — and the Metadata map, where any write or
+// delete through the copy is a write through to the stored entry. ToolCall is
+// value-only (strings inside ToolCallFunction), so cloning the slice clones
+// the elements. Metadata values are the frozen llm_tier scalar set (float64,
+// bool, string), so a top-level map clone is sufficient; a future caller that
+// stores a pointer or slice under a Metadata key must clone it there, not
+// here. Nil slice and nil map stay nil: callers assert nil for "no signaling".
 func cacheHitResponse(resp *Response) *Response {
 	if resp == nil {
 		return nil
 	}
 	cp := *resp
 	cp.CostUSD = 0
+	if resp.ToolCalls != nil {
+		cp.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+	}
+	if resp.Metadata != nil {
+		cp.Metadata = make(map[string]any, len(resp.Metadata))
+		for k, v := range resp.Metadata {
+			cp.Metadata[k] = v
+		}
+	}
 	return &cp
 }
 
