@@ -114,11 +114,14 @@ degraded sidecar). Nil on every disabled boot.
   Known gaps (accepted at review): STOP from an UNKNOWN number is not
   persisted (no ghost row — the opt-out is lost if the contact is
   seeded later), and HELP auto-replies go to opted-out contacts too.
-- The toggle is a read-modify-`Put` on the contact record. TODAY the
-  glue is the only production writer; any future contact-CRUD path that
-  re-`Put`s a record silently clears `messaging_opt_out` — a dedicated
-  column-update method is the follow-up (review finding, telnyx-texting
-  merge review 2026-11-16).
+- The toggle is a column-scoped `SetMessagingOptOut` UPDATE on the
+  contact row (#158): it writes only `messaging_opt_out` (+
+  `updated_at`), so it never round-trips a stale full record. A
+  full-record `Put` of a pre-toggle copy STILL reverts the flag — the
+  upsert's second-wins all-column write is unchanged by design — but
+  the consent path itself no longer rides that path, so a STOP can no
+  longer be silently undone by the glue's own read-modify-Put (was the
+  follow-up named in the telnyx-texting merge review 2026-11-16).
 
 ## Webhook status codes
 

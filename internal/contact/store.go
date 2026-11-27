@@ -106,6 +106,11 @@ type Store interface {
 	LookupByPhone(ctx context.Context, e164 string) (*Record, bool, error)
 	List(ctx context.Context) ([]Record, error)
 	Delete(ctx context.Context, id string) error
+	// SetMessagingOptOut is the column-scoped consent toggle (#158):
+	// writes ONLY messaging_opt_out (+ updated_at) for the normalized
+	// phone, never a full-record round-trip. Absent phone is
+	// ErrUnknownContact.
+	SetMessagingOptOut(ctx context.Context, phone string, opted bool) error
 }
 
 // SQLiteStore is the SQLite-backed contact store. A single connection
@@ -230,8 +235,9 @@ func (s *SQLiteStore) Put(ctx context.Context, rec Record) error {
 	// Upsert on phone: the phone UNIQUE constraint is the identity rule;
 	// ON CONFLICT updates every mutable column and keeps created_at.
 	// VoiceApproved and MessagingOptOut are second-wins like the other
-	// mutable columns (the owner revokes approval / the consent glue
-	// toggles opt-out by Puts the record with the flag set either way).
+	// mutable columns (the owner revokes approval by Puts the record
+	// with the flag cleared). The SMS consent toggle does NOT ride this
+	// path — it uses the column-scoped SetMessagingOptOut (#158).
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO contacts (id, display_name, phone, signal_uuid, policy, voice_approved, messaging_opt_out, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -251,6 +257,38 @@ func (s *SQLiteStore) Put(ctx context.Context, rec Record) error {
 	)
 	if err != nil {
 		return fmt.Errorf("contact store: put %s: %w", stored.ID, err)
+	}
+	return nil
+}
+
+// SetMessagingOptOut is the column-scoped consent toggle (#158). Unlike
+// Put — an all-column upsert whose second-wins rule silently reverts a
+// STOP that interleaved with a stale full-record write — this UPDATE
+// touches ONLY messaging_opt_out and updated_at, so a concurrent owner
+// edit of any other column can never clobber the consent flag (and vice
+// versa: the toggle never rewrites a stale copy of the rest of the row).
+// The phone is normalized exactly like the write boundary in Put. An
+// absent phone is ErrUnknownContact (no ghost row, C1 posture).
+func (s *SQLiteStore) SetMessagingOptOut(ctx context.Context, phone string, opted bool) error {
+	normalized := NormalizeE164(phone)
+	if !e164Pattern.MatchString(normalized) {
+		return fmt.Errorf("%w: %q", ErrInvalidPhone, normalized)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE contacts SET messaging_opt_out = ?, updated_at = ? WHERE phone = ?`,
+		boolToInt(opted),
+		time.Now().UTC().Format(time.RFC3339Nano),
+		normalized,
+	)
+	if err != nil {
+		return fmt.Errorf("contact store: set messaging_opt_out %s: %w", normalized, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("contact store: set messaging_opt_out %s: rows affected: %w", normalized, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: phone %s", ErrUnknownContact, normalized)
 	}
 	return nil
 }

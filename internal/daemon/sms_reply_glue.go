@@ -8,8 +8,9 @@ package daemon
 // InboundTopic publish (messaging_arming.go). The hook switches on the
 // sms.ClassifyReply action:
 //
-//	ReplyStop  -> contact opt-out SET (read-modify-Put, second-wins,
-//	               contact/store.go:221-258) + courtesy confirmation.
+//	ReplyStop  -> contact opt-out SET via the column-scoped
+//	               SetMessagingOptOut toggle (#158 — no full-record
+//	               Put round-trip) + courtesy confirmation.
 //	               Unknown number: NO ghost record, confirmation still
 //	               sends (02-glue task 1). Already-opted-out contact:
 //	               silent (the confirmation dedupes store-read-side —
@@ -117,7 +118,8 @@ func newConsentReplyHook(d consentReplyDeps) func(voicetelnyx.Message, sms.Reply
 }
 
 // consentStop implements the STOP leg: SET MessagingOptOut on an existing
-// record (read-modify-Put; unknown numbers create NO ghost row) and send
+// record via the column-scoped SetMessagingOptOut toggle (#158 — never a
+// full-record Put round-trip; unknown numbers create NO ghost row) and send
 // the courtesy confirmation through the DIRECT sender — even to the
 // just-set opt-out (TCPA courtesy exception, 02-glue task 2; the contact
 // channel's D5 consult would refuse exactly this message).
@@ -138,12 +140,16 @@ func consentStop(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message) 
 		case err == nil:
 			if rec.MessagingOptOut {
 				// Already opted out: confirmation dedupes (second
-				// STOP sends nothing, flag stays set).
+				// STOP sends nothing, flag stays set). Fast path
+				// only — the toggle itself is column-scoped.
 				log.Debug("daemon: duplicate STOP from opted-out contact; no confirmation", "event_id", msg.EventID)
 				return nil
 			}
-			rec.MessagingOptOut = true
-			if err := d.Contacts.Put(ctx, rec); err != nil {
+			// Column-scoped toggle (#158): NEVER a full-record Put
+			// round-trip — a stale read-modify-Put could clobber a
+			// concurrent owner edit, and a concurrent owner Put of a
+			// stale copy could silently revert this opt-out.
+			if err := d.Contacts.SetMessagingOptOut(ctx, rec.Phone, true); err != nil {
 				firstErr = fmt.Errorf("daemon: consent STOP opt-out write: %w", err)
 			}
 		case errors.Is(err, contact.ErrUnknownContact):
@@ -181,8 +187,8 @@ func consentStart(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message)
 				log.Debug("daemon: START from already-subscribed contact; no confirmation", "event_id", msg.EventID)
 				return nil
 			}
-			rec.MessagingOptOut = false
-			if err := d.Contacts.Put(ctx, rec); err != nil {
+			// Column-scoped toggle (#158) — STOP/START mirror.
+			if err := d.Contacts.SetMessagingOptOut(ctx, rec.Phone, false); err != nil {
 				firstErr = fmt.Errorf("daemon: consent START opt-in write: %w", err)
 			}
 		case errors.Is(err, contact.ErrUnknownContact):
