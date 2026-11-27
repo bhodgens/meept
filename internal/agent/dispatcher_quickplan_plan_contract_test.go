@@ -139,6 +139,104 @@ func TestRouteToPlan_QuickPlanAdoptedTaskRollsup(t *testing.T) {
 	}
 }
 
+// TestRouteToPlan_QuickPlanFailedTaskFailsPlan pins H1 (bughunt
+// 2026-11-27): a FAILED completion of the dispatched task rolls the
+// zero-phase adopted contract to StateFailed with a plan.failed publish —
+// never completed. The parent-task tail is this contract's ONLY rollup
+// path (no phases exist), so the failed status must be consulted there.
+func TestRouteToPlan_QuickPlanFailedTaskFailsPlan(t *testing.T) {
+	d, pstore, _ := newQuickPlanContractDispatcher(t, false)
+	ctx := context.Background()
+
+	intent := &Intent{
+		Type:             string(IntentQuickPlan),
+		Confidence:       0.8,
+		AgentType:        "orchestrator",
+		Summary:          "ship the migration",
+		RequiresPlanning: true,
+	}
+	res, err := d.routeToPlan(ctx, "ship the migration end to end without check-ins", intent, "sess-contract-fail")
+	if err != nil {
+		t.Fatalf("routeToPlan: %v", err)
+	}
+	if err := d.planManager.OnTaskCompleted(ctx, res.Task.ID, "failed"); err != nil {
+		t.Fatalf("OnTaskCompleted(failed): %v", err)
+	}
+	got, err := pstore.GetPlan(ctx, res.Plan.ID)
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	if got.State != plan.StateFailed {
+		t.Errorf("plan state after failed task = %q, want %q (H1)", got.State, plan.StateFailed)
+	}
+	if got.State == plan.StateCompleted {
+		t.Error("failed task COMPLETED the plan: the H1 lie")
+	}
+}
+
+// TestRouteToPlan_QuickPlanSubmitFailureLeavesDraftNoAdoptStamp pins L4
+// (bughunt 2026-11-27): when SubmitAndApproveNoSynthesis fails, the row
+// stays DRAFT with NO adopt-failure stamp — the old shape adopted a draft
+// row twice (refused both times) and stamped an adopt-prefixed error that
+// mislabeled a submit failure as an adopt failure. The task still executes.
+func TestRouteToPlan_QuickPlanSubmitFailureLeavesDraftNoAdoptStamp(t *testing.T) {
+	d, pstore, _ := newQuickPlanContractDispatcher(t, false)
+	ctx := context.Background()
+
+	// Force the submit failure deterministically: failUpdatePlanStateWhere
+	// wraps the real store and fails the pending_approval CAS that
+	// SubmitForApproval (the submit half of SubmitAndApproveNoSynthesis)
+	// fires, so the submit fails AFTER the row was created — the exact
+	// transient shape the L4 branch must survive.
+	intent := &Intent{
+		Type:             string(IntentQuickPlan),
+		Confidence:       0.8,
+		AgentType:        "orchestrator",
+		Summary:          "ship the migration",
+		RequiresPlanning: true,
+	}
+	failing := &submitFailPlanStore{SQLiteStore: pstore}
+	pm2 := plan.NewPlanManager(failing, nil, config.PlansConfig{Mode: "always"}, nil, digestTestLogger())
+	d.SetPlanManager(pm2)
+
+	res, err := d.routeToPlan(ctx, "ship the migration end to end without check-ins", intent, "sess-contract-submit-fail")
+	if err != nil {
+		t.Fatalf("routeToPlan: %v", err)
+	}
+	if res.Task == nil {
+		t.Fatal("submit-failure branch produced no task; the dispatch must still execute")
+	}
+
+	// The row stays DRAFT (submit failed before any approval committed),
+	// with NO adopt-prefixed stamp: the branch must never AdoptTask a
+	// draft row (refused twice pre-fix) nor MarkAdoptFailure it — the
+	// stamp mislabeled a submit failure as an adopt failure.
+	got, err := pstore.GetPlan(ctx, res.Plan.ID)
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	if got.State != plan.StateDraft {
+		t.Errorf("plan state after submit failure = %q, want %q (L4: the row stays draft)", got.State, plan.StateDraft)
+	}
+	if got.SynthesisError != "" {
+		t.Errorf("SynthesisError = %q, want empty (no adopt-failure stamp on a submit failure)", got.SynthesisError)
+	}
+}
+
+// submitFailPlanStore wraps the real SQLite store and fails exactly one
+// seam: the pending_approval CAS that SubmitForApproval commits (draft ->
+// pending_approval via UpdatePlanStateWhere). Everything else forwards.
+type submitFailPlanStore struct {
+	*plan.SQLiteStore
+}
+
+func (s *submitFailPlanStore) UpdatePlanStateWhere(ctx context.Context, id string, from []plan.PlanState, to plan.PlanState) (bool, error) {
+	if to == plan.StatePendingApproval {
+		return false, nil // lost-race shape: zero rows affected, no error
+	}
+	return s.SQLiteStore.UpdatePlanStateWhere(ctx, id, from, to)
+}
+
 // TestRouteToPlan_QuickPlanApprovalRequestedParks pins the C-3/D3 true
 // posture: row parks at pending_approval, NO task is created, and the
 // reply carries the legacy "plan created" text.

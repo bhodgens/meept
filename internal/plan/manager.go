@@ -372,14 +372,41 @@ func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisRec
 			if p.TaskID != "" || seen[p.ID] {
 				continue
 			}
-			// Ruling B (issue #177): a quick-plan-tagged approved row is
-			// driven by the APPROVE RESUMER (createTask + AdoptTask),
-			// never by this pass — re-driving Synthesize on a zero-phase
-			// brief hits the completion guard and marks the contract done
-			// while its execution never ran (the M11 lie). The tag makes
-			// the posture explicit even before an adopt failure stamps it.
+			// Ruling B (issue #177) + bughunt 2026-11-27 M1: a
+			// quick-plan-tagged approved row is driven by the APPROVE
+			// RESUMER (createTask + AdoptTask), never by Synthesize —
+			// re-driving a zero-phase brief hits the completion guard
+			// and marks the contract done while its execution never
+			// ran (the M11 lie). M1 closes the dead-end the audit
+			// found: the resumer is fire-once from ApprovePlan, so an
+			// approved-and-unbound tagged row stranded by a resumer
+			// failure (createTask error, nil registry/bus) sat forever.
+			// The reclaimer now re-invokes the resumer idempotently (it
+			// returns nil for an already-bound row). A row stamped with
+			// an adopt failure is the C-5 degraded shape — the task is
+			// already live unlinked — and stays skipped. A rig without
+			// a wired resumer keeps the honest approved-unbound wait.
 			if p.Kind == QuickPlanKind {
-				counts.skipped++
+				if carriesAdoptFailure(p) {
+					counts.skipped++
+					continue
+				}
+				m.execMu.RLock()
+				resumer := m.planExecResumer
+				m.execMu.RUnlock()
+				if resumer == nil {
+					counts.skipped++
+					continue
+				}
+				seen[p.ID] = true
+				counts.redriven++
+				m.logger.Info("plan reclaimer: re-invoking quick_plan execution resumer for an approved unbound contract",
+					"plan_id", p.ID)
+				if err := resumer(ctx, p.ID); err != nil {
+					counts.failed++
+					m.logger.Warn("plan reclaimer: quick_plan resumer re-drive failed",
+						"plan_id", p.ID, "error", err)
+				}
 				continue
 			}
 			// C-5 (D5): a quick_plan row whose binding failed twice
@@ -1222,6 +1249,17 @@ func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, looku
 	}
 	if tk == nil {
 		return true, fmt.Sprintf("plan stalled in executing: parent task %s is missing", p.TaskID)
+	}
+	// Bughunt 2026-11-27 M1: a quick_plan contract whose parent task sat in
+	// `pending` past the window is stalled. The strategic planner task on
+	// this lane IS scheduled (unlike the never-scheduled synthesis parent
+	// below), so pending forever means the orchestrator.plan dispatch was
+	// lost (the resumer's publish-failure shape) and nothing will ever
+	// advance it. The phase consult below cannot see this shape: a
+	// quick_plan contract carries zero phases, so totalSteps stays 0 and
+	// the all-terminal bail fires first.
+	if p.Kind == QuickPlanKind && tk.State == task.StatePending {
+		return true, fmt.Sprintf("plan stalled in executing: quick_plan parent task %s stuck in pending past the stall window", p.TaskID)
 	}
 	if tk.State == task.StateFailed {
 		return true, fmt.Sprintf("plan stalled in executing: parent task %s already failed", p.TaskID)
@@ -2287,6 +2325,17 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID, status string
 		return nil
 	}
 
+	// Bughunt 2026-11-27 H1: a FAILED parent-task completion must roll the
+	// plan to failed, not completed. This tail is the ONLY rollup path for a
+	// zero-phase adopted quick_plan contract (no phases exist, so
+	// completePlan's PhaseFailed scan would never fire) — consult `failed`
+	// here exactly like the isPhase branch above. The tactical scheduler
+	// publishes task.completed{status:"failed"} with the step error as
+	// result and plan/handler passes the status through.
+	if failed {
+		return m.failPlan(ctx, planID)
+	}
+
 	return m.completePlan(ctx, planID)
 }
 
@@ -2351,8 +2400,12 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 
 // failPlan transitions a plan whose phases all resolved with at least one
 // PhaseFailed to StateFailed, and stamps the outcome into plan.md. It is the
-// failure sibling of completePlan (leaf 02 T2, audit M-6 / plan F1). The
-// transition rides the table's executing -> failed edge through the same
+// failure sibling of completePlan (leaf 02 T2, audit M-6 / plan F1). Since
+// bughunt 2026-11-27 H1 it is also the rollup for a FAILED zero-phase
+// phase rows the reason stays the phase-less default and the guarded CAS +
+// plan.failed event below are state-machine legal for exactly that shape
+// (executing -> failed, no PhaseFailed phase required). The transition
+// rides the table's executing -> failed edge through the same
 // guarded CAS as every other lifecycle move (C-P4), so a concurrent
 // CancelPlan still wins with exactly one winner. C6 (01-safety gate T8):
 // the transition publishes plan.failed {plan_id, session_id, reason} --

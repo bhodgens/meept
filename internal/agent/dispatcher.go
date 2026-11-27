@@ -2429,9 +2429,10 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 	// user (the plan is awaiting their approval, execution starts on
 	// approve).
 	//
-	// A submit/approve/adopt failure never fails the dispatch: the task
-	// (false branch) still executes and the plan row stays re-drivable by
-	// the approval/reclaim paths.
+	// A submit/approve/adopt failure never fails the dispatch: on a submit
+	// failure the task still executes and the row stays DRAFT for the
+	// approval/reclaim paths; an adopt failure stamps the approved row
+	// (C-5) and the task still executes.
 	if IntentType(intent.Type) == IntentQuickPlan {
 		if intent.ApprovalRequested {
 			// Ruling B (issue #177): the park carries the quick-plan lane
@@ -2460,11 +2461,25 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 			}, nil
 		}
 
+		// Bughunt 2026-11-27 L4: a submit failure leaves the row DRAFT —
+		// AdoptTask refuses draft rows, so adopt+retry+MarkAdoptFailure
+		// only stamped an adopt-prefixed error onto a row no scanner
+		// revisits, mislabeling the cause (submit failed, not adopt).
+		// The task still executes (the false-branch posture) with the
+		// draft row left for the approval/reclaim paths to act on.
 		if err := d.planManager.SubmitAndApproveNoSynthesis(ctx, p.ID); err != nil {
-			d.logger.Warn("failed to auto-approve quick_plan contract",
+			d.logger.Warn("quick_plan contract never approved: submit/auto-approve failed; task executes with the row left draft for the approval/reclaim paths",
 				"plan_id", p.ID,
 				"error", err,
 			)
+			created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
+			d.logger.Info("Executing quick_plan contract (unapproved draft row)",
+				"plan_id", p.ID,
+				"title", p.Title,
+				"state", p.State,
+				"session", sessionID,
+			)
+			return d.quickPlanDispatchResult(created, intent, p, agentOverrideApplied, intent.AgentType), nil
 		}
 		created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
 		if created != nil {
@@ -2518,14 +2533,7 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 		if resultAgent == "" || resultAgent == config.AgentIDChat {
 			resultAgent = config.AgentIDPlanner
 		}
-		return &DispatchResult{
-			AgentID:              resultAgent,
-			Task:                 created,
-			Intent:               intent,
-			Plan:                 p,
-			SuggestedMode:        IntentQuickPlan.SuggestedMode(),
-			AgentOverrideApplied: agentOverrideApplied,
-		}, nil
+		return d.quickPlanDispatchResult(created, intent, p, agentOverrideApplied, resultAgent), nil
 	}
 
 	return &DispatchResult{
@@ -2534,6 +2542,25 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 		Response: fmt.Sprintf("plan created: %s (status: %s)", p.Title, p.State),
 		Plan:     p,
 	}, nil
+}
+
+// quickPlanDispatchResult assembles the async-ack DispatchResult shared by
+// the quick_plan contract's success and submit-failure tails (bughunt
+// 2026-11-27 L4). resultAgent overrides the planner default on the override
+// lane; an empty value falls back to the planner. The task may be nil on a
+// createTask failure — the ack still carries the plan row.
+func (d *Dispatcher) quickPlanDispatchResult(created *task.Task, intent *Intent, p *plan.Plan, agentOverrideApplied bool, resultAgent string) *DispatchResult {
+	if resultAgent == "" {
+		resultAgent = config.AgentIDPlanner
+	}
+	return &DispatchResult{
+		AgentID:              resultAgent,
+		Task:                 created,
+		Intent:               intent,
+		Plan:                 p,
+		SuggestedMode:        IntentQuickPlan.SuggestedMode(),
+		AgentOverrideApplied: agentOverrideApplied,
+	}
 }
 
 // buildClarificationResult creates a DispatchResult for ambiguous input

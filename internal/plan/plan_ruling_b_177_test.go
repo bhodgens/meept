@@ -229,6 +229,83 @@ func TestApprovePlanNoResumerKeepsRowApprovedNotCompleted(t *testing.T) {
 	}
 }
 
+// TestReclaimerReDrivesApprovedUnboundQuickPlanViaResumer pins M1
+// (bughunt 2026-11-27): an approved, unbound, tagged row stranded by a
+// resumer failure is RE-INVOKED through the execution resumer by the
+// reclaimer pass — no longer a dead end. The adopt-failure-stamped shape
+// (C-5) stays skipped, and an unwired resumer keeps the honest wait.
+func TestReclaimerReDrivesApprovedUnboundQuickPlanViaResumer(t *testing.T) {
+	mgr, store, creator := newRulingBManager(t)
+	ctx := context.Background()
+
+	// (1) Stranded-by-resumer-failure shape: approve commits, the resumer
+	// errors, the row stays approved + unbound. The next reclaim pass
+	// must re-invoke the resumer.
+	p, err := mgr.CreatePlan(ctx, "Stranded brief", "plan the rework", "proj-m1", t.TempDir(), "sess-m1")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if err := mgr.SubmitForApproval(ctx, p.ID, QuickPlanKind); err != nil {
+		t.Fatalf("SubmitForApproval: %v", err)
+	}
+	rec := &resumerRecorder{errOn: errors.New("resumer down"), entered: make(chan struct{}, 8)}
+	mgr.SetPlanExecutionResumer(rec.fn)
+	if err := mgr.ApprovePlan(ctx, p.ID, "sess-m1", "operator"); err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
+	// The resumer runs on a bounded goroutine — wait for the first fire.
+	select {
+	case <-rec.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("resumer never fired on approve; pin precondition broken")
+	}
+	if got, gerr := store.GetPlan(ctx, p.ID); gerr != nil || got.State != StateApproved || got.TaskID != "" {
+		t.Fatalf("precondition: state=%s err=%v, want approved+unbound after resumer failure", got.State, gerr)
+	}
+	firstCalls := rec.count()
+
+	counts, err := mgr.runSynthesisReclaimPass(ctx)
+	if err != nil {
+		t.Fatalf("runSynthesisReclaimPass: %v", err)
+	}
+	if counts.redriven != 1 {
+		t.Errorf("reclaimer redriven = %d, want 1 (the stranded tagged row)", counts.redriven)
+	}
+	if rec.count() != firstCalls+1 {
+		t.Errorf("resumer calls = %d, want %d+1 (re-invoked once by the reclaimer)", rec.count(), firstCalls)
+	}
+	if parents, _ := creator.counts(); parents != 0 {
+		t.Errorf("task creator calls = %d, want 0 (re-drive rides the resumer, never Synthesize)", parents)
+	}
+
+	// (2) C-5 adopt-failure shape stays skipped: stamp the row and the
+	// pass must not re-invoke the resumer for it.
+	if err := mgr.MarkAdoptFailure(ctx, p.ID, errors.New("binding refused twice")); err != nil {
+		t.Fatalf("MarkAdoptFailure: %v", err)
+	}
+	before := rec.count()
+	counts, err = mgr.runSynthesisReclaimPass(ctx)
+	if err != nil {
+		t.Fatalf("runSynthesisReclaimPass(stamped): %v", err)
+	}
+	if counts.redriven != 0 {
+		t.Errorf("reclaimer redriven (stamped row) = %d, want 0 (C-5 skip)", counts.redriven)
+	}
+	if rec.count() != before {
+		t.Errorf("resumer fired for an adopt-failure-stamped row: %d -> %d", before, rec.count())
+	}
+
+	// (3) Unwired resumer keeps the honest approved-unbound wait (no panic,
+	// no synthesis).
+	mgr.SetPlanExecutionResumer(nil)
+	if _, err := mgr.runSynthesisReclaimPass(ctx); err != nil {
+		t.Fatalf("runSynthesisReclaimPass(unwired): %v", err)
+	}
+	if parents, _ := creator.counts(); parents != 0 {
+		t.Errorf("task creator calls after unwired pass = %d, want 0", parents)
+	}
+}
+
 // TestSynthesizeKindGuardRefusesQuickPlanRows pins the last-line guard: a
 // DIRECT Synthesize call (any caller) on a tagged row is a silent no-op —
 // the row stays put and no zero-phase completion can fire, even if a

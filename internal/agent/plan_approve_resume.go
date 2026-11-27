@@ -53,6 +53,19 @@ func (d *Dispatcher) planApproveResumer(ctx context.Context, planID string) erro
 	if err != nil {
 		return fmt.Errorf("plan approve resumer: get plan: %w", err)
 	}
+	// Bughunt 2026-11-27 M1: the registry/bus guards run BEFORE any state
+	// change. Above createTask they previously sat at the tail, so a rig
+	// without a bus minted a pending task and bound the row executing
+	// before discovering nothing could ever dispatch it — the stranded
+	// executing-with-pending-task shape. Fail first, before any state
+	// change: the row stays approved/unbound and the reclaimer's
+	// quick-plan arm re-drives it.
+	if d.taskRegistry == nil {
+		return fmt.Errorf("plan approve resumer: no task registry wired, cannot dispatch plan %s", planID)
+	}
+	if d.taskRegistry.Bus() == nil {
+		return fmt.Errorf("plan approve resumer: no bus wired, cannot dispatch plan %s", planID)
+	}
 	// Shape guards: only a quick-plan-tagged, task-less row is this
 	// resumer's business. A bound/executing row already rides execution
 	// (crash re-drive says nil); a foreign lane must never be
@@ -164,15 +177,13 @@ func (d *Dispatcher) planApproveResumer(ctx context.Context, planID string) erro
 	}
 	// nil-guard: rigs without a task registry have no reachable bus
 	// (calling Bus() on a nil *task.Registry would deref a nil receiver).
+	// The pre-flight guards above already returned for this shape; the
+	// check stays as the defensive last line before Publish.
 	if d.taskRegistry == nil {
 		return fmt.Errorf("plan approve resumer: no task registry wired, orchestrator.plan not published (task %s)", created.ID)
 	}
 	bus := d.taskRegistry.Bus()
 	if bus == nil {
-		// No bus reachable: the task exists (pending) and the row is
-		// executing, but nothing will decompose/run it yet. Return the
-		// error so the resumer log records the degraded shape; the
-		// stall sweep / re-drive paths own recovery.
 		return fmt.Errorf("plan approve resumer: no bus wired, orchestrator.plan not published (task %s)", created.ID)
 	}
 	if delivered := bus.Publish("orchestrator.plan", msg); delivered == 0 {
