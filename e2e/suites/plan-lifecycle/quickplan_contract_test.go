@@ -15,11 +15,13 @@
 //     SAME lane with Intent.Method "compound_quickplan" (D4), observable
 //     as the turn.terminal classified_by provenance;
 //   - approval_requested (D3) is the single pause: the row parks at
-//     pending_approval with the legacy "plan created: ... (status:
-//     pending_approval)" reply and ZERO tasks; the operator's
-//     plan.approve then leaves pending_approval — this suite pins the
-//     CURRENT post-approve execution shape (zero-phase instant-complete;
-//     see the D5-adjacent owner edge in the test body).
+//     pending_approval (kind=quick_plan tag) with the legacy "plan
+//     created: ... (status: pending_approval)" reply and ZERO tasks;
+//     the operator's plan.approve releases the brief INTO the same
+//     execution lane as the auto-approve branch (issue #177 owner
+//     ruling B, 2026-11-26: resumer -> createTask + AdoptTask ->
+//     executing -> rollup completed; the pre-ruling zero-phase
+//     instant-complete is the pinned-away bug).
 //
 // Rig patterns follow the suite's prior waves: classifier/analyzer
 // pinned through the fake LLM (harness.Script on the "intent analysis
@@ -408,20 +410,26 @@ func TestSequentialCompoundRidesQuickPlanContract(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // plan-lifecycle-09 (M): approval_requested parks the contract; operator
-// approve releases it (M6/D3; the single pause)
+// approve RELEASES IT INTO EXECUTION (M6/D3 park + issue #177 ruling B)
 // ---------------------------------------------------------------------------
 
-// TestApprovalRequestedParksAndOperatorApprove pins the D3 exception
-// end to end: an analyzer verdict with approval_requested true parks the
-// quick_plan row at pending_approval with the "plan created: ...
-// (status: pending_approval)" reply and ZERO task rows (the oneshot
-// default is overridden ONLY here). The operator's plan.approve then
-// moves the row out of pending_approval. CURRENT post-approve shape is
-// pinned, not idealized: the dispatch-path brief carries zero phases,
-// so ApprovePlan -> Synthesize hits the zero-phase guard and completes
-// the row instantly WITHOUT executing the brief (D5-adjacent owner edge
-// — flagged in the leaf-04 report; the fix ruling, phase-seeding vs
-// exemption, is pending).
+// TestApprovalRequestedParksAndOperatorApprove pins the D3 exception and
+// the ruling-B post-approve shape end to end: an analyzer verdict with
+// approval_requested true parks the quick_plan row at pending_approval
+// with the "plan created: ... (status: pending_approval)" reply and ZERO
+// task rows (the oneshot default is overridden ONLY here). The operator's
+// plan.approve then runs the SAME lane as the auto-approve branch (issue
+// #177 owner ruling B, 2026-11-26): the row leaves pending_approval, the
+// approve resumer (dispatcher SetPlanManager wiring) mints the strategic
+// task, AdoptTask binds it (task_id non-empty, row -> executing), the
+// fake planner decomposes and the task runs to completion — and the plan
+// rolls up to completed through the task (D2).
+//
+// The PRE-ruling pin (approve -> Synthesize zero-phase guard -> instant
+// completed with no task, "D5-adjacent owner edge PINNED") is DELETED:
+// that completion-without-execution shape is the bug the ruling closed,
+// and this scenario now FAILS if it ever returns (state completed with an
+// empty task_id at any point after approve is asserted against).
 func TestApprovalRequestedParksAndOperatorApprove(t *testing.T) {
 	s := qpStack(t)
 	sessionID := s.CreateSession(t, "qp-park", s.ProjectDir)
@@ -478,6 +486,14 @@ func TestApprovalRequestedParksAndOperatorApprove(t *testing.T) {
 	}
 	waitForPlanState(t, s, planID, "pending_approval", 30*time.Second)
 
+	// Ruling B park-time tag: the dispatcher's quick_plan park stamps
+	// plans.kind=quick_plan (internal/plan QuickPlanKind) so the approve
+	// branch can identify the row as a parked brief. plan.get returns the
+	// Plan JSON; the field must be present and tagged BEFORE any approve.
+	if kind := str(rpc(t, s, "plan.get", map[string]any{"id": planID}), "kind"); kind != "quick_plan" {
+		t.Fatalf("qp09: parked quick_plan row kind = %q, want quick_plan (park-time tag missing — approve cannot branch)", kind)
+	}
+
 	// The park creates NO task: execution starts on approve, not before.
 	time.Sleep(2 * time.Second)
 	if rows := harness.Tasks(t, s.TasksDBPath()); len(rows) != 0 {
@@ -488,39 +504,111 @@ func TestApprovalRequestedParksAndOperatorApprove(t *testing.T) {
 		t.Fatalf("qp09: approval_requested dispatch minted %d task rows %v, want 0 (park posture creates no task)", len(rows), ids)
 	}
 
-	// Operator approves: the row must leave pending_approval. Pinned
-	// CURRENT behavior (zero-phase instant-complete via Synthesize's
-	// guard): approved rows with no phases complete without executing
-	// the brief. If the owner ruling later makes approve seed/drive a
-	// real execution, THIS pin is the line that changes.
+	// Pin the executor lane BEFORE approve so the released task really
+	// runs: the harness default planner JSON yields the scripted single
+	// step, the queued write_file tool call executes on the step's loop
+	// (same mechanism as scenarios 07/08), and the post-tool text ends
+	// the turn.
+	artifact := filepath.Join(s.ProjectDir, "qp09-rework.md")
+	s.Fake.EnqueueFileWrite("call-qp09", artifact, "rework executed after approve")
+	s.Fake.SetPostToolText("Created qp09-rework.md with the rework note.")
+
+	// Operator approves. Ruling B: the row must leave pending_approval and
+	// reach EXECUTING with a bound task — never the pre-ruling
+	// zero-phase instant-complete (completed with an empty task_id).
 	rpc(t, s, "plan.approve", map[string]any{"plan_id": planID, "by": "e2e-operator"})
 
+	// Half 1 (immediate): the approval committed — the row is out of
+	// pending_approval within the approve call.
 	got := rpc(t, s, "plan.get", map[string]any{"id": planID})
 	state := str(got, "state")
-	if state == "pending_approval" {
-		t.Fatalf("qp09: plan.approve left the row parked at pending_approval: %v", got)
+	if state == "pending_approval" || state == "draft" {
+		t.Fatalf("qp09: plan.approve left the row parked: %v", got)
 	}
-	if state != "completed" {
-		t.Logf("qp09: post-approve state = %q (zero-phase instant-complete edge NOT observed — check whether approve now drives execution)", state)
-	} else {
-		t.Logf("qp09: D5-adjacent owner edge PINNED: post-approve of a parked zero-phase quick_plan brief completes INSTANTLY (state=completed, no executing, no synthesized task) — the brief is never executed. ApprovePlan -> Synthesize -> zero-phase guard (internal/plan/manager.go).")
-	}
-	if tid := str(got, "task_id"); tid != "" {
-		t.Logf("qp09: post-approve task_id = %q (zero-phase completion expected empty)", tid)
+	// The INSTANT-COMPLETION anti-pin: completed with no task_id is the
+	// #177 bug. It must never appear at ANY post-approve observation.
+	if state == "completed" && str(got, "task_id") == "" {
+		t.Fatalf("qp09: REGRESSION — approve zero-phase-completed the brief (state=completed, task_id empty): %v", got)
 	}
 
-	// The park published plan.submitting but never plan.executing/completed
-	// BEFORE the approve — assert the parked window held (no zombie
-	// auto-run while awaiting sign-off): between submit and the drain we
-	// observed the park; after approve, whatever Synthesize did, the row
-	// is terminal-consistent (completed carries plan.completed or a
-	// documented instant-complete above).
-	coll.drain()
-	if str(rpc(t, s, "plan.get", map[string]any{"id": planID}), "state") == "executing" {
-		// Tolerable transient only if a real task exists (a driving
-		// approve). No task => executing is the zombie shape deleted.
-		if len(harness.Tasks(t, s.TasksDBPath())) == 0 {
-			t.Errorf("qp09: row sits executing with zero task rows — zombie contract")
+	// Half 2 (resumer seam): the row reaches executing with a NON-EMPTY
+	// task_id — the approve resumer minted and adopted the strategic task.
+	harness.WaitFor(t, 30*time.Second, "post-approve executing with bound task", func() bool {
+		got = rpc(t, s, "plan.get", map[string]any{"id": planID})
+		state = str(got, "state")
+		return (state == "executing" || state == "completed") && str(got, "task_id") != ""
+	})
+	taskID := str(got, "task_id")
+	if taskID == "" {
+		t.Fatalf("qp09: post-approve row never bound a task (state %q): the resumer seam is dead: %v", state, got)
+	}
+	if state == "completed" {
+		// Legal only because the whole execute+rollup already ran — the
+		// task row must exist and be completed, never the zero-phase lie.
+		t.Logf("qp09: fake-LLM raced the rollup: row already completed with task_id=%s (bound-task execution ran; anti-instant-complete pin holds because task_id is non-empty)", taskID)
+	}
+
+	// The released task really exists as a task row (no zombie contract:
+	// executing must carry a live task).
+	harness.WaitFor(t, 20*time.Second, "the approve-resumed task row", func() bool {
+		rows := harness.Tasks(t, s.TasksDBPath())
+		for _, r := range rows {
+			if r.ID == taskID {
+				return true
+			}
 		}
+		return false
+	})
+
+	// Half 3 (D2 rollup): the turn completes — the task finishes and the
+	// plan rolls up to completed through the task's completion (the same
+	// rollup the contract scenarios 07/08 pin).
+	row := harness.WaitTaskCompleted(t, s.TasksDBPath(), taskID, 180*time.Second)
+	if row.State != "completed" {
+		t.Fatalf("qp09: resumed task %s final state = %q, want completed; row: %+v\nlog tail:\n%s",
+			taskID, row.State, row, s.Daemon.LogTail())
+	}
+	waitForPlanState(t, s, planID, "completed", 60*time.Second)
+
+	// The brief actually executed: the step's artifact exists.
+	if data, err := os.ReadFile(artifact); err != nil || !strings.Contains(string(data), "rework executed after approve") {
+		t.Fatalf("qp09: post-approve artifact missing or wrong (err=%v): the approved brief was never executed", err)
+	}
+
+	// Bus evidence: the parked window never leaked execution, and the
+	// post-approve lifecycle really transited submitting -> approved ->
+	// executing -> completed.
+	coll.drain()
+	coll.waitFor(t, 10*time.Second, "plan.completed bus event after approve", func() bool {
+		for _, tp := range coll.topics {
+			if tp == "plan.completed" {
+				return true
+			}
+		}
+		return false
+	})
+	var idxSubmit, idxApprove, idxExec, idxDone = -1, -1, -1, -1
+	for i, tp := range coll.topics {
+		switch tp {
+		case "plan.submitting":
+			if idxSubmit < 0 {
+				idxSubmit = i
+			}
+		case "plan.approved":
+			if idxApprove < 0 {
+				idxApprove = i
+			}
+		case "plan.executing":
+			if idxExec < 0 {
+				idxExec = i
+			}
+		case "plan.completed":
+			idxDone = i
+		}
+	}
+	if idxSubmit < 0 || idxApprove < 0 || idxExec < 0 || idxDone < 0 ||
+		!(idxSubmit < idxApprove && idxApprove < idxExec && idxExec < idxDone) {
+		t.Errorf("qp09: post-approve bus sequence not submitting<approved<executing<completed: indexes %d/%d/%d/%d of topics %v",
+			idxSubmit, idxApprove, idxExec, idxDone, coll.topics)
 	}
 }

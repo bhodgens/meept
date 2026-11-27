@@ -6425,7 +6425,7 @@
       "id": "plan-lifecycle-09",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval_requested parks the quick_plan contract (M6/D3): row pending_approval with 'plan created: ... (status: pending_approval)' reply and ZERO tasks; operator plan.approve leaves the gate (current zero-phase instant-complete shape pinned - D5-adjacent owner edge)",
+      "title": "approval_requested parks the quick_plan contract (M6/D3): row kind-tagged pending_approval with 'plan created: ... (status: pending_approval)' reply and ZERO tasks; operator plan.approve releases it into execution (#177 ruling B: resumer -> task bound -> executing -> rollup completed; zero-phase instant-complete is the pinned-away bug)",
       "paths": [
         "internal/agent/dispatcher.go",
         "internal/agent/intent_analyzer.go",
