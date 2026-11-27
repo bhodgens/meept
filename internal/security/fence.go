@@ -29,10 +29,17 @@ var ErrOutsideSessionRoot = errors.New("outside the session worktree")
 // CheckPathJailed, which applies the jail narrowing. The
 // internal/agent/fence_stage.go factory mints *FenceChecker instances that
 // satisfy it; the capability probe keeps plain FenceChecker doubles valid.
+//
+// The #137 follow-on added the variadic extraRoots parameter to
+// CheckPathJailed. Go interface methods match signatures exactly, so the
+// concrete *FenceChecker keeps this interface satisfied automatically;
+// external doubles that declared the strict 3-arg shape stop satisfying it
+// (internal/agent's jailedFenceStage is the only consumer and it calls
+// through the concrete constructor — see fence_stage.go).
 type JailedFenceChecker interface {
 	CheckPath(path string, op string) error
 	CheckCommand(command string, workDir string) error
-	CheckPathJailed(path string, op string, jailRoot string) error
+	CheckPathJailed(path string, op string, jailRoot string, extraRoots ...string) error
 }
 
 // FenceConfig controls path fencing for a session.
@@ -195,7 +202,7 @@ func splitPath(path string) []string {
 // op is "read", "write", or "exec".
 // Returns nil if allowed, error if blocked or misconfigured.
 func (fc *FenceChecker) CheckPath(path string, op string) error {
-	return fc.checkPath(path, op, "")
+	return fc.checkPath(path, op, "", nil)
 }
 
 // CheckPathJailed validates a path against the fence AND against the
@@ -222,36 +229,58 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 // (internal/agent/fence_stage.go). The jail is a per-CALL argument, so the
 // same checker can serve two sessions with different roots concurrently.
 //
+// extraRoots (#137 follow-on) is the list of ADDITIONAL WRITABLE jail roots
+// — in production exactly one: the session's scratch directory
+// (<MEEPT_HOME data root>/scratch/<sanitized session id>). A path inside ANY
+// extra root is allowed with the same short-circuit as jailRoot (the roots
+// are unioned into the jail, not ranked). Empty/whitespace entries are
+// ignored, so a caller with no valid session id passes nothing and gets the
+// exact worktree-only posture.
+//
 // Contract:
-//   - jailRoot empty (or all whitespace) -> identical to CheckPath. This is
-//     mandatory: unbound sessions and every non-session caller must keep the
-//     pre-jail behavior byte for byte.
+//   - jailRoot empty (or all whitespace) and no extra roots -> identical to
+//     CheckPath. This is mandatory: unbound sessions and every non-session
+//     caller must keep the pre-jail behavior byte for byte.
 //   - NoFence / !Enabled -> allowed, jail included (the per-session
 //     --nofence override outranks the jail, same as the fence itself).
-//   - A path inside jailRoot -> allowed, even when the ordinary fence would
-//     refuse it: the jail is the caller's own worktree, and it is the
-//     narrower, more specific contract.
-//   - A path outside jailRoot -> ErrOutsideSessionRoot, even when the static
-//     fence (or AllowRead) would admit it. The jail only NARROWS.
+//   - A path inside jailRoot OR any extra root -> allowed, even when the
+//     ordinary fence would refuse it: the jail is the caller's own worktree
+//     (plus its scratch lane), and it is the narrower, more specific contract.
+//   - A path outside jailRoot AND every extra root -> ErrOutsideSessionRoot,
+//     even when the static fence (or AllowRead) would admit it. The jail
+//     only NARROWS; the error shape is unchanged.
 //
 // Symlinks are resolved before the comparison (the shared path resolution
 // below), so a link inside the session root pointing outside it is refused.
-func (fc *FenceChecker) CheckPathJailed(path string, op string, jailRoot string) error {
+func (fc *FenceChecker) CheckPathJailed(path string, op string, jailRoot string, extraRoots ...string) error {
 	jail := strings.TrimSpace(jailRoot)
-	if jail == "" {
+	if jail == "" && !hasUsableExtraRoot(extraRoots) {
 		return fc.CheckPath(path, op)
 	}
-	return fc.checkPath(path, op, jail)
+	return fc.checkPath(path, op, jail, extraRoots)
+}
+
+// hasUsableExtraRoot reports whether any candidate scratch root survives
+// whitespace trimming (the same "blank == absent" rule as jailRoot).
+func hasUsableExtraRoot(extraRoots []string) bool {
+	for _, r := range extraRoots {
+		if strings.TrimSpace(r) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // checkPath is the shared body of CheckPath / CheckPathJailed.
 //
 // jailRoot is either "" (unjailed, the legacy posture) or the caller's
-// session worktree. When set, it is evaluated AFTER the path has been fully
-// resolved (absolute + symlinks) and BEFORE the ordinary root/AllowRead
-// checks, so an in-jail path short-circuits to allowed and an out-of-jail
-// path is refused regardless of what the rig-wide allowlist says.
-func (fc *FenceChecker) checkPath(path string, op string, jailRoot string) error {
+// session worktree, and extraRoots (#137 follow-on) are the additional
+// writable jail roots (the session scratch dir). When any of them is set,
+// the union is evaluated AFTER the path has been fully resolved (absolute +
+// symlinks) and BEFORE the ordinary root/AllowRead checks, so an in-jail
+// path short-circuits to allowed and an out-of-jail path is refused
+// regardless of what the rig-wide allowlist says.
+func (fc *FenceChecker) checkPath(path string, op string, jailRoot string, extraRoots []string) error {
 	cfg := fc.snapshot()
 	if cfg.NoFence || !cfg.Enabled {
 		return nil
@@ -273,19 +302,32 @@ func (fc *FenceChecker) checkPath(path string, op string, jailRoot string) error
 		return fmt.Errorf("fence: cannot resolve symlinks for %q", path)
 	}
 
-	// Per-session jail (issue #138). The jail is the caller's own worktree,
-	// so it wins over the rig-wide allowlist in both directions: inside is
-	// allowed unconditionally, outside is refused unconditionally.
-	if jailRoot != "" {
-		jailAbs, err := filepath.Abs(jailRoot)
-		if err != nil {
-			return fmt.Errorf("fence: cannot resolve session root %q: %w", jailRoot, err)
+	// Per-session jail (issue #138) plus the per-session scratch root
+	// (#137 follow-on). The jail roots are the caller's own worktree and
+	// its scratch lane, so they win over the rig-wide allowlist in both
+	// directions: inside ANY of them is allowed unconditionally, outside
+	// all of them is refused unconditionally.
+	if jailRoot != "" || len(extraRoots) > 0 {
+		jailed := false
+		if jailRoot != "" {
+			jailed, err = resolvedPathWithin(abs, jailRoot)
+			if err != nil {
+				return err
+			}
 		}
-		jail, ok := resolveSymlinks(jailAbs)
-		if !ok {
-			return fmt.Errorf("fence: cannot resolve symlinks for session root %q", jailRoot)
+		for _, extra := range extraRoots {
+			if jailed {
+				break
+			}
+			if strings.TrimSpace(extra) == "" {
+				continue
+			}
+			jailed, err = resolvedPathWithin(abs, extra)
+			if err != nil {
+				return err
+			}
 		}
-		if pathWithin(abs, jail) {
+		if jailed {
 			return nil
 		}
 		return fmt.Errorf("fence: %w: %q is %s access outside the session root %q", ErrOutsideSessionRoot, path, op, jailRoot)
@@ -330,6 +372,24 @@ func (fc *FenceChecker) checkPath(path string, op string, jailRoot string) error
 // job, done once in checkPath).
 func pathWithin(abs, root string) bool {
 	return strings.HasPrefix(abs, root+string(os.PathSeparator)) || abs == root
+}
+
+// resolvedPathWithin resolves a jail/extra root (absolute + symlinks, the
+// same fail-hard shape as the candidate resolution in checkPath) and reports
+// whether the pre-resolved candidate sits at or under it. The error is the
+// resolution failure in the jail's own words — kept distinct from the
+// outside-the-session-root denial so a misconfigured root never masquerades
+// as a policy refusal.
+func resolvedPathWithin(abs, root string) (bool, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false, fmt.Errorf("fence: cannot resolve session root %q: %w", root, err)
+	}
+	resolved, ok := resolveSymlinks(rootAbs)
+	if !ok {
+		return false, fmt.Errorf("fence: cannot resolve symlinks for session root %q", root)
+	}
+	return pathWithin(abs, resolved), nil
 }
 
 // CheckCommand validates a shell command and its working directory.

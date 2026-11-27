@@ -4030,7 +4030,7 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 						// record in one pass (the old `if fence != nil
 						// {...} else if group` shape was dead — base is
 						// always non-nil, so the group branch never ran).
-						if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess.NoFence, loop.GroupResolution()); gfence != nil {
+						if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess.NoFence, sessionIDForFence(sess), loop.GroupResolution()); gfence != nil {
 							loop.SetSecurityChecker(gfence)
 						}
 						if sess.DetectionContext != nil {
@@ -4093,7 +4093,7 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 							// roots (leaf 04 F6, bughunt H6/A2-1) compose in
 							// the same pass via composeLoopFence (the old
 							// else-branch never ran: base is always non-nil).
-							if gfence := composeLoopFence(template.security, d.fenceFactory, projectPath, sess.NoFence, loop.GroupResolution()); gfence != nil {
+							if gfence := composeLoopFence(template.security, d.fenceFactory, projectPath, sess.NoFence, sessionIDForFence(sess), loop.GroupResolution()); gfence != nil {
 								loop.SetSecurityChecker(gfence)
 							}
 							return loop
@@ -4194,7 +4194,7 @@ func (d *Dispatcher) scopedSessionLoop(agentID, conversationID, workingDir strin
 	// composeLoopFence arms both stances in one pass; the scoped loop is
 	// built from the template snapshot, which carries the group resolution
 	// record (three-site rule site 2), so GroupResolution() is valid here.
-	if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess != nil && sess.NoFence, loop.GroupResolution()); gfence != nil {
+	if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess != nil && sess.NoFence, sessionIDForFence(sess), loop.GroupResolution()); gfence != nil {
 		loop.SetSecurityChecker(gfence)
 	}
 

@@ -193,11 +193,23 @@ func TestStepJobDirBinding_NoDirAnywhereRefusesActionably(t *testing.T) {
 // agent.ComposeSessionFence (in-jail short-circuits, outside refused even
 // where the glob admits).
 //
+// The #137 follow-on extends this pin: the step lane threads the resolved
+// session's PRIMARY id to the mint, so the session's scratch dir
+// (<MEEPT_HOME>/scratch/<session id>) is WRITABLE inside the jail while
+// out-of-jail writes stay refused and a DIFFERENT session's scratch lane
+// stays denied (the per-session boundary bites on this lane too).
+//
 // Fixture mirrors the rig: base checker whose glob admits BOTH the task
 // worktree and a sibling "repo" clone (the hallucinated target); the
 // jail must deny the clone write and allow the worktree write.
 func TestStepJobFence_JailsTaskLoopToWorktree(t *testing.T) {
 	p, ss, ts := newTestAgentJobProcessor(t)
+
+	// #137 follow-on: pin the MEEPT_HOME data root so the scratch-dir
+	// resolution is observable (and never touches the developer's real
+	// ~/.meept during tests).
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
 
 	base := security.NewPermissionChecker(security.Config{AllowedPaths: []string{"/**"}})
 	registry := agent.NewAgentRegistry(agent.RegistryConfig{
@@ -230,8 +242,8 @@ func TestStepJobFence_JailsTaskLoopToWorktree(t *testing.T) {
 	sess.WorktreePath = worktree
 	seedTestTask(t, ts, "task-dir-gate", []string{sess.ConversationID})
 
-	p.WithSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-		return agent.NewSessionFenceStage(rootPath, nil, noFence, slog.New(slog.DiscardHandler))
+	p.WithSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
+		return agent.NewSessionFenceStage(rootPath, nil, noFence, sessionID, slog.New(slog.DiscardHandler))
 	})
 
 	job := &queue.Job{
@@ -257,6 +269,19 @@ func TestStepJobFence_JailsTaskLoopToWorktree(t *testing.T) {
 	}
 	if got := secured.CheckPermissionForAgent("file_write", map[string]string{"path": filepath.Join(worktree, "transcript-check.txt")}, ""); !got.Allowed {
 		t.Errorf("write inside the task worktree (the jail root) must pass: %+v", got)
+	}
+
+	// #137 follow-on, scratch half of pin (a): the session's own scratch
+	// dir is writable through the STEP lane's armed checker...
+	scratchFile := filepath.Join(home, "scratch", sess.ID, "test-artifact.bin")
+	if got := secured.CheckPermissionForAgent("file_write", map[string]string{"path": scratchFile}, ""); !got.Allowed {
+		t.Errorf("write into the session scratch dir denied on the step lane — the #137 follow-on mint did not thread the session id: %+v", got)
+	}
+	// ...while a DIFFERENT session's scratch lane stays DENIED (pin (b) on
+	// this lane — the per-session boundary must bite here too).
+	otherScratchFile := filepath.Join(home, "scratch", "session-other0000", "artifact.bin")
+	if got := secured.CheckPermissionForAgent("file_write", map[string]string{"path": otherScratchFile}, ""); got.Allowed {
+		t.Errorf("write into ANOTHER session's scratch dir allowed through the step-jail: %+v", got)
 	}
 }
 

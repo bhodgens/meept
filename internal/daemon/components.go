@@ -5224,14 +5224,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// mutation raced concurrent sessions).
 	if c.ChatHandler != nil && cfg.Security.FenceEnabled {
 		fenceAllowRead := cfg.Security.FenceAllowRead
-		c.ChatHandler.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+		c.ChatHandler.SetSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
 			// Issue #157: mint through agent.NewSessionFenceStage so the
 			// per-session FenceStage carries the #138 jail narrowing
 			// (in-jail short-circuits the allowlist; out-of-jail is
 			// refused even if AllowRead admits it). This replaces the
 			// retired per-tool fenceChecker wiring that left the jail
 			// dead in production.
-			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, sessionID, logger)
 		})
 		logger.Info("Per-session fence factory wired (root set per session loop)")
 	}
@@ -5249,10 +5249,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// per session.
 	if c.Dispatcher != nil && cfg.Security.FenceEnabled {
 		fenceAllowRead := cfg.Security.FenceAllowRead
-		c.Dispatcher.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
+		c.Dispatcher.SetSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
 			// Issue #157: same re-homed mint as the ChatHandler site —
 			// the session FenceStage carries the #138 jail narrowing.
-			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, sessionID, logger)
 		})
 	}
 
@@ -5263,8 +5263,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the bench regression tasks run on). Same mint, same gate.
 	if cfg.Security.FenceEnabled {
 		jobFenceAllowRead := cfg.Security.FenceAllowRead
-		jobProc.WithSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-			return agent.NewSessionFenceStage(rootPath, jobFenceAllowRead, noFence, logger)
+		jobProc.WithSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
+			return agent.NewSessionFenceStage(rootPath, jobFenceAllowRead, noFence, sessionID, logger)
 		})
 	}
 	// Wire the job processor to the bus. Use the msgBus PARAMETER, not
@@ -11105,7 +11105,7 @@ type AgentJobProcessor struct {
 	// through while the intended narrow jail is the per-task worktree.
 	// Nil (default/tests) leaves the pre-#137 group-only posture byte-
 	// identical.
-	fenceFactory func(rootPath string, noFence bool) security.FenceStage
+	fenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 	// bus carries job-level quota surfacing (leaf 06): step jobs that fail
 	// terminal on a provider quota block publish the EXISTING agent.quota_wait
 	// event so the user hears the real cause. Nil (the default for processors
@@ -11173,7 +11173,7 @@ func (p *AgentJobProcessor) WithTaskStore(ts *task.Store) *AgentJobProcessor {
 // the same mint the ChatHandler/Dispatcher sites receive (the daemon
 // routes it through agent.NewSessionFenceStage so the #138 jail engages).
 // Nil keeps the group-only posture.
-func (p *AgentJobProcessor) WithSessionFenceFactory(f func(rootPath string, noFence bool) security.FenceStage) *AgentJobProcessor {
+func (p *AgentJobProcessor) WithSessionFenceFactory(f func(rootPath string, noFence bool, sessionID string) security.FenceStage) *AgentJobProcessor {
 	p.fenceFactory = f
 	return p
 }
@@ -11602,7 +11602,15 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 				if sess != nil {
 					stepNoFence = sess.NoFence
 				}
-				gf := agent.ComposeSessionFence(loop.Security(), p.fenceFactory, wd, stepNoFence, loop.GroupResolution())
+				// #137 follow-on: the mint keys the per-session scratch
+				// root on the resolved session's PRIMARY id (falls back
+				// to the payload hint when no row resolved — an odd/empty
+				// id arms nothing, worktree-only posture).
+				stepFenceSessionID := stepPayload.SessionID
+				if sess != nil {
+					stepFenceSessionID = sess.ID
+				}
+				gf := agent.ComposeSessionFence(loop.Security(), p.fenceFactory, wd, stepNoFence, stepFenceSessionID, loop.GroupResolution())
 				if gf == nil {
 					gf = agent.InjectGroupFence(loop.Security(), loop.GroupResolution())
 				}
@@ -11662,7 +11670,13 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 					if sess != nil {
 						noFence = sess.NoFence
 					}
-					if gf := agent.ComposeSessionFence(scoped.Security(), p.fenceFactory, wd, noFence, scoped.GroupResolution()); gf != nil && gf != scoped.Security() {
+					// #137 follow-on: same scratch-keying rule as the
+					// GetForTask branch (primary id when resolved).
+					fenceSessionID := stepPayload.SessionID
+					if sess != nil {
+						fenceSessionID = sess.ID
+					}
+					if gf := agent.ComposeSessionFence(scoped.Security(), p.fenceFactory, wd, noFence, fenceSessionID, scoped.GroupResolution()); gf != nil && gf != scoped.Security() {
 						scoped.SetSecurityChecker(gf)
 					}
 				}

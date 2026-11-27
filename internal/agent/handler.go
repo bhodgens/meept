@@ -4194,7 +4194,7 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// h.loop.GroupResolution() == the resolved loop's record). Without a
 	// managed record the call is byte-identical to the old
 	// injectSessionFence shape.
-	fence := composeLoopFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence, h.loop.GroupResolution())
+	fence := composeLoopFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence, sessionIDForFence(sess), h.loop.GroupResolution())
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent
 	// sessions). If manager creation fails, fall back to a per-turn
