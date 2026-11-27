@@ -209,10 +209,14 @@ func seamWindowBudgets(t *testing.T, loop *AgentLoop) (iter, conv int) {
 // T5: doc path rewiring
 // ---------------------------------------------------------------------------
 
-// TestDocPathRewiringDisabledUntouched pins that the disabled path never
-// consults the budgeted builder: docBudgetViaSeam reports
-// seamEnabled=false so injectProjectContext calls the unbounded
-// BuildFullArtifactContext exactly as before.
+// TestDocPathRewiringDisabledUntouched pins that the disabled seam never
+// consults the allocator: docBudgetViaSeam reports seamEnabled=false.
+// (#193 increment 2 changed what injectProjectContext does with that
+// verdict: the seam-off lane now routes through
+// BuildFullArtifactContextBudgeted with the DefaultDocBudgetTokens
+// fallback instead of the unbounded BuildFullArtifactContext;
+// AgentConfig.ArtifactContextWholeDoc restores the unbounded dump,
+// pinned in prompt_ambient_context_test.go.)
 func TestDocPathRewiringDisabledUntouched(t *testing.T) {
 	loop := newSeamTestLoop(t, false, &seamLoopProvider{})
 	budget, enabled := loop.docBudgetViaSeam(context.Background())

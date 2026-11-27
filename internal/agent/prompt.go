@@ -79,6 +79,12 @@ type promptSection struct {
 	// session (constants, config values, project files). AddSection leaves
 	// this false (conservative); AddSectionWithStability sets it explicitly.
 	stable bool
+	// kind is the taxonomy name used for per-section telemetry (#193
+	// increment 2): when set, classifySections reports the section under
+	// this name instead of the positional "custom-<title>-N" default, so
+	// the ambient dumps (skills, artifact docs) are aggregable across
+	// turns. Empty = positional name (byte-identical legacy behavior).
+	kind string
 }
 
 // NewPromptBuilder creates a new PromptBuilder with default values.
@@ -200,6 +206,18 @@ func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder {
 // BuildSystemPromptOrdered. stable=false matches AddSection behavior.
 func (b *PromptBuilder) AddSectionWithStability(title, content string, stable bool) *PromptBuilder {
 	b.customSections = append(b.customSections, promptSection{title: title, content: content, stable: stable})
+	return b
+}
+
+// AddSectionWithKind adds an unstable custom section with an explicit
+// telemetry taxonomy name (#193 increment 2). The section renders and
+// classifies exactly like AddSection (same prompt bytes, same stable=false);
+// only the per-section name in agent.prompt_section.bytes differs: the
+// given kind ("skills", "artifact-context") instead of the positional
+// "custom-<title>-N". Use for ambient sections whose size must be
+// aggregated across turns regardless of their assembly position.
+func (b *PromptBuilder) AddSectionWithKind(title, content, kind string) *PromptBuilder {
+	b.customSections = append(b.customSections, promptSection{title: title, content: content, kind: kind})
 	return b
 }
 
@@ -656,8 +674,14 @@ func (b *PromptBuilder) classifySections() []PromptSection {
 	for i, section := range b.customSections {
 		// Stability comes from the add-time classification: AddSection is
 		// conservatively unstable; AddSectionWithStability opts in.
+		// Telemetry name: an explicit kind (AddSectionWithKind, #193
+		// increment 2) wins over the positional custom-<title>-<i> name.
+		name := section.kind
+		if name == "" {
+			name = "custom-" + section.title + "-" + fmt.Sprint(i)
+		}
 		sections = append(sections, PromptSection{
-			Name:   "custom-" + section.title + "-" + fmt.Sprint(i),
+			Name:   name,
 			Stable: section.stable,
 			Body:   "\n# " + section.title + "\n" + section.content,
 		})

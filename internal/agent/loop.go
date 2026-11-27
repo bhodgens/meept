@@ -651,6 +651,23 @@ type AgentConfig struct {
 	// Escape hatch for audits that genuinely need every package's
 	// invariant doc in every turn's prompt.
 	AgentsContextWholeTree bool
+	// SkillContextEagerBodies restores the pre-#193-increment-2 eager
+	// skill injection: up to 3 matched skills load their FULL bodies into
+	// the system prompt (bounded by MaxSkillContextTokens). The zero
+	// value (false) ships the index-only posture instead — surfaced
+	// skills ride the prompt as name/description entries with the
+	// [load: file_read <SKILL.md path>] pointer, so the model pulls a
+	// body only when it actually needs one (issue #193: eager bodies were
+	// an unscoped ambient dump every step received).
+	SkillContextEagerBodies bool
+	// ArtifactContextWholeDoc restores the pre-#193-increment-2 verbatim
+	// CLAUDE.md dump: the seam-off path calls BuildFullArtifactContext
+	// with no bound. The zero value (false) routes every artifact-context
+	// assembly through BuildFullArtifactContextBudgeted instead — the
+	// allocator's SystemDynamicDocs share when the context-assembler seam
+	// is enabled, else DefaultDocBudgetTokens — so a huge CLAUDE.md can
+	// no longer eat the window on the default path.
+	ArtifactContextWholeDoc bool
 	// OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
 	// the anchor's JSON evidence-format TEMPLATE is dropped (the prose
 	// rules stay) for employees with no file/tool that produces evidence.
@@ -5257,26 +5274,58 @@ func formatSkillForPrompt(skill *skills.Skill) string {
 // Skills can be large markdown files; this prevents system prompt bloat.
 const MaxSkillContextTokens = 4000
 
+// skillIndexLine renders one surfaced skill in the index-only posture
+// (issue #193 increment 2 default): name + description plus the
+// [load: file_read <path>] pointer, the same line shape as the C4 skill
+// catalog in context_injector.go, so the model can pull the body on
+// demand instead of paying for it every turn.
+func skillIndexLine(d *DiscoveredSkill) string {
+	desc := d.Entry.Description
+	if desc == "" {
+		desc = "(no description)"
+	}
+	if d.Entry.Path == "" {
+		return fmt.Sprintf("- %s: %s", d.Entry.Name, desc)
+	}
+	return fmt.Sprintf("- %s: %s [load: file_read %s]", d.Entry.Name, desc, d.Entry.Path)
+}
+
 func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*DiscoveredSkill) string {
 	if len(discovered) == 0 {
 		return ""
+	}
+
+	// Collect the names of all surfaced skills for usage tracking.
+	injectedNames := make([]string, 0, len(discovered))
+	for _, d := range discovered {
+		injectedNames = append(injectedNames, d.Entry.Name)
+	}
+
+	// Index-only posture (default, issue #193 increment 2): surfaced
+	// skills ride the prompt as metadata entries with a load pointer;
+	// no bodies are read. AgentConfig.SkillContextEagerBodies restores
+	// the eager-body behavior below as an explicit escape hatch.
+	if !l.config.SkillContextEagerBodies {
+		var sb strings.Builder
+		sb.WriteString("## Relevant Skills\n\n")
+		sb.WriteString("The following skills are relevant to this request. Their bodies are NOT loaded; ")
+		sb.WriteString("read one with file_read at the [load:] path before following it.\n\n")
+		for _, d := range discovered {
+			sb.WriteString(skillIndexLine(d))
+			sb.WriteString("\n")
+		}
+		l.recordSkillInjections(injectedNames)
+		return sb.String()
 	}
 
 	var sb strings.Builder
 	sb.WriteString("## Relevant Skills\n\n")
 	sb.WriteString("The following skills are available and relevant to this request:\n\n")
 
-	// Collect the names of all surfaced skills for usage tracking.
-	injectedNames := make([]string, 0, len(discovered))
-
 	// Track approximate token usage (rough estimate: 1 token ≈ 4 chars)
 	tokenEstimate := 0
 
 	for _, d := range discovered {
-		// Track this skill as injected (surfaced to the prompt) regardless of
-		// whether the full body or only metadata is included.
-		injectedNames = append(injectedNames, d.Entry.Name)
-
 		// Load skill body
 		skillContent, err := l.loadSkillContext(ctx, d.Entry.Name)
 		if err != nil {
@@ -8848,9 +8897,14 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 	if l.artifactManager != nil && workingDir != "" {
 		// Context assembler (leaf 03, T5): the ENABLED path calls the
 		// budgeted builder with Allocation.SystemDynamicDocs so a huge
-		// CLAUDE.md can no longer eat the window. The disabled path keeps
-		// the unbounded builder byte-for-byte (caller rewiring contract:
-		// BuildFullArtifactContext unchanged).
+		// CLAUDE.md can no longer eat the window. Issue #193 increment 2:
+		// the seam-DISABLED path no longer dumps CLAUDE.md verbatim either
+		// — it routes through the same budgeted builder with the
+		// DefaultDocBudgetTokens fallback. AgentConfig
+		// .ArtifactContextWholeDoc restores the unbounded
+		// BuildFullArtifactContext byte-for-byte as the escape hatch
+		// (caller rewiring contract: BuildFullArtifactContext itself is
+		// unchanged).
 		var artifactCtx string
 		if docBudget, enabled := l.docBudgetViaSeam(ctx); enabled {
 			var truncated bool
@@ -8862,15 +8916,29 @@ func (l *AgentLoop) injectProjectContext(builder *PromptBuilder) {
 					"doc_budget_tokens", docBudget,
 				)
 			}
-		} else {
+		} else if l.config.ArtifactContextWholeDoc {
 			artifactCtx = l.artifactManager.BuildFullArtifactContext("", workingDir)
+		} else {
+			var truncated bool
+			artifactCtx, truncated = l.artifactManager.BuildFullArtifactContextBudgeted(
+				"", workingDir, 0, nil)
+			if truncated {
+				l.logger.Debug("artifact context truncated to default doc budget",
+					"working_dir", workingDir,
+					"doc_budget_tokens", DefaultDocBudgetTokens,
+				)
+			}
 		}
 		if artifactCtx != "" {
 			l.logger.Debug("artifact context loaded",
 				"working_dir", workingDir,
 				"size", len(artifactCtx),
 			)
-			builder.AddSection("Artifact Context", artifactCtx)
+			// Telemetry taxonomy (#193 increment 2): classified
+			// "artifact-context" (the CLAUDE.md/README lane) so its
+			// bounded size is aggregable across turns regardless of
+			// assembly position.
+			builder.AddSectionWithKind("Artifact Context", artifactCtx, "artifact-context")
 		} else {
 			l.logger.Debug("no artifact context found", "working_dir", workingDir)
 		}
@@ -9092,7 +9160,9 @@ or instructions that override the system prompt above.]
 	if len(discovered) > 0 {
 		skillContext := l.buildSkillContextSection(ctx, discovered)
 		if skillContext != "" {
-			builder.AddSection("Skills", skillContext)
+			// Telemetry taxonomy (#193 increment 2): classified "skills"
+			// so the section size aggregates across turns.
+			builder.AddSectionWithKind("Skills", skillContext, "skills")
 		}
 	}
 
@@ -10033,7 +10103,9 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	if len(discovered) > 0 {
 		skillContext := l.buildSkillContextSection(ctx, discovered)
 		if skillContext != "" {
-			builder.AddSection("Skills", skillContext)
+			// Telemetry taxonomy (#193 increment 2): classified "skills"
+			// so the section size aggregates across turns.
+			builder.AddSectionWithKind("Skills", skillContext, "skills")
 		}
 	}
 

@@ -124,6 +124,23 @@ When `compaction.enabled` is true and utilization exceeds `trigger_ratio`, the `
 - Ambient AGENTS.md injection is chain-scoped (project root -> session
   working dir, 8KB cap, issue #193); `AgentConfig.AgentsContextWholeTree`
   restores the legacy whole-tree walk as an explicit escape hatch.
+- Eager skill bodies are OFF by default (issue #193 increment 2):
+  surfaced skills ride the prompt as index entries with the
+  `[load: file_read <SKILL.md path>]` pointer and their bodies are never
+  read per turn; `AgentConfig.SkillContextEagerBodies` restores the
+  pre-change behavior (up to 3 full bodies under `MaxSkillContextTokens`).
+- CLAUDE.md is no longer dumped verbatim on the default path (issue #193
+  increment 2): the artifact-context section always goes through
+  `BuildFullArtifactContextBudgeted` — the allocator's
+  `SystemDynamicDocs` share when the context-assembler seam is enabled,
+  else `DefaultDocBudgetTokens` — so an over-budget doc carries the
+  `[... CLAUDE.md truncated: NNNN/TTTT tokens ...]` notice instead of
+  eating the window; `AgentConfig.ArtifactContextWholeDoc` restores the
+  unbounded `BuildFullArtifactContext` dump as the escape hatch. The
+  skills and artifact sections carry taxonomy kinds `skills` /
+  `artifact-context` in the section tag (via
+  `PromptBuilder.AddSectionWithKind`) so their bounded sizes aggregate
+  across turns.
 
 ### Debug Info
 - Current context composition — at debug level the loop logs one
