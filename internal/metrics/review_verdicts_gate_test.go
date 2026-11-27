@@ -675,3 +675,217 @@ func TestVR_BREAKDOWN_1_ModelCategoryBreakdown(t *testing.T) {
 		}
 	}
 }
+
+// --- L6: model x agent grading dimension -------------------------------
+
+// recAgent seeds a verdict row with an explicit executing-agent id (the
+// payload-derived value the collector stores; "" = unknown bucket).
+func recAgent(stepID string, isFinal bool, model, agent, category, severity string) metrics.ReviewVerdictRecord {
+	r := rec(stepID, 1, isFinal, model, "judge-a", "MR-LC1", "model", category, severity)
+	r.AgentID = agent
+	return r
+}
+
+// TestVR_AGENT_1_BreakdownByAgent (L6 pin d): given seeded verdict rows
+// across two (model, agent) pairs plus a non-final and a workflow row,
+// when the model x agent breakdown runs, then per-agent rows appear for
+// the same model and the L7 is_final=1 + workflow-scope filters apply to
+// the agent dimension exactly as they do to the category dimension.
+func TestVR_AGENT_1_BreakdownByAgent(t *testing.T) {
+	store := newGateStore(t)
+	seed := []metrics.ReviewVerdictRecord{
+		// m-a under coder: 2 defects + 1 pass (final)
+		recAgent("s1", true, "m-a", "coder", "logic_error", "blocking"),
+		recAgent("s1", true, "m-a", "coder", "pass", ""),
+		recAgent("s2", true, "m-a", "coder", "style_bloat", "cosmetic"),
+		// m-a under writer: 1 defect (final)
+		recAgent("s3", true, "m-a", "writer", "logic_error", "functional"),
+		// m-a non-final coder row: must NOT count (L7 filter applies).
+		recAgent("s4", false, "m-a", "coder", "security_defect", "critical"),
+	}
+	for _, r := range seed {
+		if err := store.RecordReviewVerdict(r); err != nil {
+			t.Fatalf("RecordReviewVerdict(%s): %v", r.StepID, err)
+		}
+	}
+	// Workflow-scope row under a real agent: structurally excluded.
+	wf := recAgent("s5", true, "", "coder", "logic_error", "blocking")
+	wf.Scope = "workflow"
+	wf.ReviewedModelID = ""
+	if err := store.RecordReviewVerdict(wf); err != nil {
+		t.Fatalf("RecordReviewVerdict(workflow): %v", err)
+	}
+
+	rows, err := store.QueryReviewVerdictModelAgentBreakdown(time.Time{})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdictModelAgentBreakdown: %v", err)
+	}
+	got := map[[2]string]int64{}
+	for _, r := range rows {
+		got[[2]string{r.Model, r.Agent}] = r.Count
+		if r.Category != "" {
+			t.Errorf("agent-mode row carries category %q, want empty (agent mode groups by agent only)", r.Category)
+		}
+	}
+	want := map[[2]string]int64{
+		{"m-a", "coder"}:  3,
+		{"m-a", "writer"}: 1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("agent breakdown pairs = %d (%v), want %d", len(got), got, len(want))
+	}
+	for p, n := range want {
+		if got[p] != n {
+			t.Errorf("agent breakdown %v = %d, want %d (is_final/workflow filters must apply to the agent dimension)", p, got[p], n)
+		}
+	}
+
+	// The single-dimension agent rollup groups the same rows.
+	agg, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{GroupBy: "agent"})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdicts(agent): %v", err)
+	}
+	byGroup := map[string]int64{}
+	for _, a := range agg {
+		byGroup[a.Group] = a.Verdicts
+	}
+	if byGroup["coder"] != 3 || byGroup["writer"] != 1 {
+		t.Errorf("agent rollup = %v, want coder:3 writer:1", byGroup)
+	}
+}
+
+// TestVR_AGENT_2_LegacyUnknownAgentGrouped (L6 pin e): documented
+// behavior — rows with agent_id=” are GROUPED into the "" bucket, never
+// dropped and never invented. Given a legacy row recorded without an
+// agent (the pre-L6 producer shape) beside agented rows, the agent
+// rollup and the model x agent breakdown both surface a distinct ""
+// group, and the total across groups equals the total final rows.
+func TestVR_AGENT_2_LegacyUnknownAgentGrouped(t *testing.T) {
+	store := newGateStore(t)
+	if err := store.RecordReviewVerdict(recAgent("s-legacy", true, "m-a", "", "logic_error", "blocking")); err != nil {
+		t.Fatalf("seed legacy (agent=''): %v", err)
+	}
+	if err := store.RecordReviewVerdict(recAgent("s-new", true, "m-a", "coder", "logic_error", "blocking")); err != nil {
+		t.Fatalf("seed new (agent=coder): %v", err)
+	}
+
+	agg, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{GroupBy: "agent"})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdicts(agent): %v", err)
+	}
+	var unknownSeen, coderSeen bool
+	var total int64
+	for _, a := range agg {
+		total += a.Verdicts
+		if a.Group == "" {
+			unknownSeen = true
+		}
+		if a.Group == "coder" {
+			coderSeen = true
+		}
+	}
+	if !unknownSeen || !coderSeen {
+		t.Fatalf("agent rollup = %+v, want BOTH the '' unknown bucket and the coder group (grouped, never dropped)", agg)
+	}
+	if total != 2 {
+		t.Errorf("agent rollup total = %d, want 2 (no row lost to the bucketing)", total)
+	}
+
+	breakdown, err := store.QueryReviewVerdictModelAgentBreakdown(time.Time{})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdictModelAgentBreakdown: %v", err)
+	}
+	var pairSeen bool
+	for _, r := range breakdown {
+		if r.Model == "m-a" && r.Agent == "" {
+			pairSeen = true
+		}
+	}
+	if !pairSeen {
+		t.Errorf("model x agent breakdown = %+v, want the (m-a, \"\") unknown-agent pair present", breakdown)
+	}
+}
+
+// TestVR_AGENT_3_BackfillMigration (L6, backfill decision): a legacy
+// pre-agent_id database reopens with the column added (the ALTER
+// migration), and rows whose blamed model resolves through the step
+// trace's llm_calls join get their agent_id backfilled from that SAME
+// blame row; rows with no reliable source (no llm_calls match) keep ”
+// — best-effort, never invented.
+func TestVR_AGENT_3_BackfillMigration(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "metrics.db")
+
+	store := newGateStoreAt(t, dbPath)
+	now := time.Now().UTC()
+	// Blame-join source row: trace stp-old-1 under agent "docs-writer"
+	// serving model "m-old" (final successful).
+	store.RecordLLMCall(metrics.LLMCallRecord{Timestamp: now.Add(-time.Hour), Provider: "p", ModelID: "m-old", AgentID: "docs-writer", LatencyMs: 10, TraceID: "stp-old-1"})
+	// A verdict row AS IF produced pre-L6: recorded with the resolved
+	// model + trace but no agent (the collector had no key to read).
+	if err := store.RecordReviewVerdict(metrics.ReviewVerdictRecord{
+		StepID: "old-1", TaskID: "t-old", IsFinal: true, RubricID: "MR-LC1",
+		Scope: "model", Category: "logic_error", Severity: "blocking",
+		ReviewedModelID: "m-old", JudgeAgentID: "judge-a",
+		TraceID: "stp-old-1", Timestamp: now.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("seed pre-L6 row: %v", err)
+	}
+	// A second row whose blamed model has NO llm_calls row on its trace:
+	// no reliable agent source -> must stay ''.
+	if err := store.RecordReviewVerdict(metrics.ReviewVerdictRecord{
+		StepID: "old-2", TaskID: "t-old", IsFinal: true, RubricID: "MR-LC1",
+		Scope: "model", Category: "style_bloat", Severity: "cosmetic",
+		ReviewedModelID: "m-orphan", JudgeAgentID: "judge-a",
+		TraceID: "stp-old-2", Timestamp: now.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("seed orphan row: %v", err)
+	}
+	_ = store.Close()
+
+	// Simulate the pre-L6 schema: rebuild the table without agent_id.
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE mrv_nocol AS
+		SELECT id, timestamp, step_id, task_id, cycle, is_final, rubric_id, scope,
+		       category, severity, reviewed_model_id, judge_agent_id, judge_model_id,
+		       orchestrator_agent_id, orchestrator_model_id, confidence, trace_id,
+		       rubric_version
+		FROM model_review_verdicts`); err != nil {
+		t.Fatalf("rebuild without agent_id: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE model_review_verdicts`); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE mrv_nocol RENAME TO model_review_verdicts`); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	_ = db.Close()
+
+	// Reopen: the ALTER migration adds agent_id and best-effort backfills.
+	reopened := newGateStoreAt(t, dbPath)
+	type row struct {
+		StepID  string `db:"step_id"`
+		AgentID string `db:"agent_id"`
+	}
+	var rows []row
+	if err := reopened.DB().Select(&rows, `SELECT step_id, agent_id FROM model_review_verdicts ORDER BY step_id`); err != nil {
+		t.Fatalf("select after migration: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	byStep := map[string]string{}
+	for _, r := range rows {
+		byStep[r.StepID] = r.AgentID
+	}
+	if byStep["old-1"] != "docs-writer" {
+		t.Errorf("old-1 agent_id = %q, want backfilled \"docs-writer\" from the blame-join llm_calls row", byStep["old-1"])
+	}
+	if byStep["old-2"] != "" {
+		t.Errorf("old-2 agent_id = %q, want \"\" (no reliable source -> never invented)", byStep["old-2"])
+	}
+}

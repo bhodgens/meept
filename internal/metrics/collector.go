@@ -422,6 +422,7 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 		StepID              string  `json:"step_id"`
 		TaskID              string  `json:"task_id"`
 		ReviewedModelID     string  `json:"reviewed_model_id"`
+		ReviewedAgentID     string  `json:"reviewed_agent_id"`
 		JudgeAgentID        string  `json:"judge_agent_id"`
 		JudgeModelID        string  `json:"judge_model_id"`
 		OrchestratorAgentID string  `json:"orchestrator_agent_id"`
@@ -464,15 +465,20 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 	now := time.Now().UTC()
 	for _, v := range payload.Verdicts {
 		rec := ReviewVerdictRecord{
-			StepID:              payload.StepID,
-			TaskID:              payload.TaskID,
-			Cycle:               payload.Cycle,
-			IsFinal:             payload.IsFinal,
-			RubricID:            v.RubricID,
-			Scope:               v.Scope,
-			Category:            v.Category,
-			Severity:            v.Severity,
-			ReviewedModelID:     payload.ReviewedModelID,
+			StepID:          payload.StepID,
+			TaskID:          payload.TaskID,
+			Cycle:           payload.Cycle,
+			IsFinal:         payload.IsFinal,
+			RubricID:        v.RubricID,
+			Scope:           v.Scope,
+			Category:        v.Category,
+			Severity:        v.Severity,
+			ReviewedModelID: payload.ReviewedModelID,
+			// L6 model x agent dimension: the EXECUTING agent of the
+			// graded work, verbatim from the payload. "" (legacy
+			// producers, unknown) stores as "" — the surfaces group
+			// it, never guess it.
+			AgentID:             payload.ReviewedAgentID,
 			JudgeAgentID:        judgeAgent,
 			JudgeModelID:        payload.JudgeModelID,
 			OrchestratorAgentID: payload.OrchestratorAgentID,

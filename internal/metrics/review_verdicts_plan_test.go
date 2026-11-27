@@ -223,7 +223,7 @@ func assertBreakdownMatches(t *testing.T, store *Store, since time.Time, expecte
 // temp tree is a planner cost choice, not a full scan).
 func TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex(t *testing.T) {
 	store, since, expected := newPlanStore(t)
-	query, args := reviewVerdictBreakdownSQL(since)
+	query, args := reviewVerdictBreakdownSQL(since, "category")
 
 	details := explainBreakdown(t, store.db, query, args...)
 	t.Logf("with-index plan:\n  %s", strings.Join(details, "\n  "))

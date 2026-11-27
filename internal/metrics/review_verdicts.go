@@ -72,7 +72,9 @@ CREATE TABLE IF NOT EXISTS model_review_verdicts (
     orchestrator_model_id TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 0,
     trace_id TEXT NOT NULL DEFAULT '',
-    rubric_version TEXT NOT NULL DEFAULT '1'
+    rubric_version TEXT NOT NULL DEFAULT '1',
+    -- L6: the EXECUTING agent of the graded work (model x agent view).
+    agent_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_mrv_step ON model_review_verdicts(step_id);
 CREATE INDEX IF NOT EXISTS idx_mrv_model_ts ON model_review_verdicts(reviewed_model_id, timestamp);
@@ -103,6 +105,38 @@ CREATE INDEX IF NOT EXISTS idx_mrv_breakdown_window ON model_review_verdicts(rev
 	if _, err := db.Exec(`UPDATE model_review_verdicts SET rubric_version = '1' WHERE rubric_version = ''`); err != nil {
 		return fmt.Errorf("failed to backfill rubric_version: %w", err)
 	}
+	// L6 (owner ruling 2026-11-27): agent_id carries the EXECUTING agent
+	// of the graded work, enabling the model x agent grading dimension.
+	// Fresh DBs get it from the DDL; existing DBs gain it via ALTER
+	// (idempotent on "duplicate column name").
+	if _, err := db.Exec(`ALTER TABLE model_review_verdicts ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add agent_id column: %w", err)
+		}
+	}
+	// Legacy backfill, BEST-EFFORT (L6 ruling: honesty over invented
+	// data). The pre-L6 payload carried no executing-agent key, but the
+	// step-lane rows have a step-scoped trace_id ("stp-"+stepID, one
+	// agent per step by construction) and a resolved reviewed_model_id,
+	// so the llm_calls row that WAS the blame join names the agent: the
+	// UPDATE below recovers agent_id from exactly that row (final
+	// successful call serving the blamed model under the row's trace).
+	// Rows whose trace has no such row — workflow-scope rows (empty
+	// model), pre-trace rows (empty trace_id), or rows whose blamed model
+	// no longer exists in llm_calls — keep agent_id='' rather than
+	// guessing: the surfaces group '' rows as the documented
+	// unknown-agent bucket (never dropped, never invented).
+	if _, err := db.Exec(`UPDATE model_review_verdicts
+		SET agent_id = COALESCE((
+			SELECT lc.agent_id FROM llm_calls lc
+			WHERE lc.trace_id = model_review_verdicts.trace_id
+			  AND lc.model_id = model_review_verdicts.reviewed_model_id
+			  AND lc.error = 0
+			ORDER BY lc.timestamp DESC, lc.id DESC
+			LIMIT 1), '')
+		WHERE agent_id = '' AND trace_id != '' AND reviewed_model_id != ''`); err != nil {
+		return fmt.Errorf("failed to backfill agent_id: %w", err)
+	}
 	return nil
 }
 
@@ -130,8 +164,14 @@ type ReviewVerdictRecord struct {
 	// graded under. Empty on input means "stamp the current catalog
 	// version" — the only value producers should ever need. A non-empty
 	// input pins an explicit version (used by tests and future migrations).
-	RubricVersion string    `db:"rubric_version"`
-	Timestamp     time.Time `db:"timestamp"`
+	RubricVersion string `db:"rubric_version"`
+	// AgentID is the EXECUTING agent of the graded work (L6 model x
+	// agent dimension). The collector fills it from the payload's
+	// "reviewed_agent_id" key; empty means unknown (legacy rows,
+	// producers without an agent identity) and the agent-grouped
+	// surfaces bucket it under "".
+	AgentID   string    `db:"agent_id"`
+	Timestamp time.Time `db:"timestamp"`
 }
 
 // RecordReviewVerdict validates the scope/category/severity combination
@@ -165,13 +205,13 @@ func (s *Store) RecordReviewVerdict(rec ReviewVerdictRecord) error {
 			(timestamp, step_id, task_id, cycle, is_final, rubric_id, scope,
 			 category, severity, reviewed_model_id, judge_agent_id,
 			 judge_model_id, orchestrator_agent_id, orchestrator_model_id,
-			 confidence, trace_id, rubric_version)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 confidence, trace_id, rubric_version, agent_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), rec.StepID, rec.TaskID, rec.Cycle,
 		isFinal, rec.RubricID, rec.Scope, rec.Category, rec.Severity,
 		rec.ReviewedModelID, rec.JudgeAgentID, rec.JudgeModelID,
 		rec.OrchestratorAgentID, rec.OrchestratorModelID,
-		rec.Confidence, rec.TraceID, version,
+		rec.Confidence, rec.TraceID, version, rec.AgentID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record review verdict: %w", err)
@@ -180,8 +220,9 @@ func (s *Store) RecordReviewVerdict(rec ReviewVerdictRecord) error {
 }
 
 // ReviewVerdictQuery selects and groups verdict rollups (contract C2).
-// GroupBy is one of "model", "judge", "category", "rubric". By default
-// workflow-scope rows are excluded from aggregates; IncludeWorkflow opts in.
+// GroupBy is one of "model", "judge", "category", "rubric", "agent" (L6:
+// the executing agent). By default workflow-scope rows are excluded from
+// aggregates; IncludeWorkflow opts in.
 type ReviewVerdictQuery struct {
 	Since           time.Time
 	GroupBy         string
@@ -202,12 +243,17 @@ type ReviewVerdictRow struct {
 }
 
 // verdictGroupColumn maps a GroupBy value to its column. The mapping is a
-// fixed whitelist — never user-supplied SQL.
+// fixed whitelist — never user-supplied SQL. "agent" is the L6 dimension:
+// the EXECUTING agent of the graded work (rows that never learned it —
+// legacy rows the best-effort backfill could not resolve — group under
+// the "" bucket; documented in docs/workflows/model-rating.md:
+// GROUPED, never dropped, never invented).
 var verdictGroupColumn = map[string]string{
 	"model":    "reviewed_model_id",
 	"judge":    "judge_agent_id",
 	"category": "category",
 	"rubric":   "rubric_id",
+	"agent":    "agent_id",
 }
 
 // rubricStatements maps catalog rubric ids to their statements (modelrating.
@@ -241,7 +287,7 @@ func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, e
 func queryReviewVerdicts(db *sqlx.DB, q ReviewVerdictQuery) ([]ReviewVerdictRow, error) {
 	col, ok := verdictGroupColumn[q.GroupBy]
 	if !ok {
-		return nil, fmt.Errorf("invalid GroupBy %q (want model, judge, category, or rubric)", q.GroupBy)
+		return nil, fmt.Errorf("invalid GroupBy %q (want model, judge, category, rubric, or agent)", q.GroupBy)
 	}
 
 	query := fmt.Sprintf(`SELECT %[1]s AS grp,
@@ -326,11 +372,25 @@ func (s *Store) CountReviewVerdicts(q ReviewVerdictQuery) (int64, error) {
 // group-by per category. Workflow-scope rows are always excluded (their
 // reviewed_model_id is empty by contract C2). Pass rows appear as
 // Category="pass" so a model's denominator rides in the same result.
+//
+// L6 adds the model x AGENT view: in agent-grouped mode the Agent field
+// carries the executing agent (the reviewed-side agent_id column) and
+// Category stays empty. The Category tag is omitempty so the pre-existing
+// model_category rows serialize byte-identically; the Agent tag is
+// omitempty so model_agent rows never gain a phantom category key and
+// model_category rows never gain a phantom agent key. Rows whose
+// agent_id is unknown (legacy rows the best-effort backfill could not
+// resolve; the documented behavior) group under Agent="" — GROUPED as
+// the unknown bucket, never dropped, never invented.
 type ReviewVerdictBreakdownRow struct {
 	// Model is the reviewed model id.
 	Model string `json:"model" db:"model"`
-	// Category is the frozen defect category or "pass".
+	// Category is the frozen defect category or "pass" (category mode;
+	// "" in agent mode — the key stays always-present so pre-existing
+	// model_category JSON is byte-identical).
 	Category string `json:"category" db:"category"`
+	// Agent is the executing agent id (agent mode; "" in category mode).
+	Agent string `json:"agent,omitempty" db:"agent"`
 	// Count is the number of in-window verdict rows for the pair.
 	Count int64 `json:"count" db:"count"`
 }
@@ -340,13 +400,20 @@ type ReviewVerdictBreakdownRow struct {
 // unbounded. Ordering: model ASC, then count DESC, then category ASC —
 // stable for tables and tests.
 func (s *Store) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
-	return queryReviewVerdictBreakdown(s.db, since)
+	return queryReviewVerdictBreakdown(s.db, since, "category")
+}
+
+// QueryReviewVerdictModelAgentBreakdown is the L6 model x agent twin:
+// verdicts per (reviewed model, executing agent). Same exclusions, same
+// window, same ORDER BY shape (model ASC, count DESC, agent ASC).
+func (s *Store) QueryReviewVerdictModelAgentBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	return queryReviewVerdictBreakdown(s.db, since, "agent")
 }
 
 // queryReviewVerdictBreakdown is the sqlx-level implementation shared by
 // *Store and *ReadOnlyStore.
-func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictBreakdownRow, error) {
-	query, args := reviewVerdictBreakdownSQL(since)
+func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time, dimension string) ([]ReviewVerdictBreakdownRow, error) {
+	query, args := reviewVerdictBreakdownSQL(since, dimension)
 	var rows []ReviewVerdictBreakdownRow
 	if err := db.Select(&rows, query, args...); err != nil {
 		return nil, fmt.Errorf("failed to query review verdict breakdown: %w", err)
@@ -357,25 +424,34 @@ func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictB
 	return rows, nil
 }
 
-// reviewVerdictBreakdownSQL builds the windowed model x category breakdown SQL
-// and its ?-bound args. Extracted from queryReviewVerdictBreakdown so the
-// EXPLAIN QUERY PLAN pin (review_verdicts_plan_test.go) reads the exact
-// statement the read path executes — if the two could drift, the pin would be
-// testing a query that never runs.
-func reviewVerdictBreakdownSQL(since time.Time) (string, []any) {
+// reviewVerdictBreakdownSQL builds the windowed model x dimension breakdown
+// SQL and its ?-bound args. dimension is the fixed "category" (default) or
+// "agent" (L6) token — a whitelist switch, never interpolated user input;
+// an unknown value falls back to "category" rather than building SQL from
+// it. Extracted from queryReviewVerdictBreakdown so the EXPLAIN QUERY PLAN
+// pin (review_verdicts_plan_test.go) reads the exact statement the read
+// path executes — if the two could drift, the pin would be testing a query
+// that never runs.
+func reviewVerdictBreakdownSQL(since time.Time, dimension string) (string, []any) {
 	// L7 (bughunt 2026-11-24): final cycles only, matching the other
 	// rollups; superseded (is_final=0) needs-info rounds must not inflate
 	// per-(model, category) counts.
-	query := `SELECT reviewed_model_id AS model, category, COUNT(*) AS count
+	// L6: reviewed_model_id stays always in the GROUP BY (the ruling's
+	// "model x agent" shape); the second key is the dimension column.
+	groupCol, tieCol := "category", "category"
+	if dimension == "agent" {
+		groupCol, tieCol = "agent_id", "agent"
+	}
+	query := fmt.Sprintf(`SELECT reviewed_model_id AS model, %[1]s AS %[2]s, COUNT(*) AS count
 		FROM model_review_verdicts
-		WHERE scope != 'workflow' AND reviewed_model_id != '' AND is_final = 1`
+		WHERE scope != 'workflow' AND reviewed_model_id != '' AND is_final = 1`, groupCol, tieCol) //nolint:gosec // both tokens are whitelist constants
 	args := []any{}
 	if !since.IsZero() {
 		query += ` AND timestamp >= ?`
 		args = append(args, since.UTC().Format(time.RFC3339))
 	}
-	query += ` GROUP BY reviewed_model_id, category
-		ORDER BY model ASC, count DESC, category ASC`
+	query += fmt.Sprintf(` GROUP BY reviewed_model_id, %[1]s
+		ORDER BY model ASC, count DESC, %[2]s ASC`, groupCol, tieCol) //nolint:gosec // whitelist constants
 	return query, args
 }
 
@@ -396,7 +472,16 @@ func (r *ReadOnlyStore) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVe
 	if r == nil || r.db == nil {
 		return []ReviewVerdictBreakdownRow{}, nil
 	}
-	return queryReviewVerdictBreakdown(r.db, since)
+	return queryReviewVerdictBreakdown(r.db, since, "category")
+}
+
+// QueryReviewVerdictModelAgentBreakdown is the read-only twin of
+// (*Store).QueryReviewVerdictModelAgentBreakdown (L6 model x agent view).
+func (r *ReadOnlyStore) QueryReviewVerdictModelAgentBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	if r == nil || r.db == nil {
+		return []ReviewVerdictBreakdownRow{}, nil
+	}
+	return queryReviewVerdictBreakdown(r.db, since, "agent")
 }
 
 // FinalVerdictsForStep returns the verdict rows for a step's LAST cycle
@@ -418,6 +503,7 @@ func (s *Store) FinalVerdictsForStep(stepID string) ([]ReviewVerdictRecord, erro
 		OrchestratorModelID string  `db:"orchestrator_model_id"`
 		Confidence          float64 `db:"confidence"`
 		TraceID             string  `db:"trace_id"`
+		AgentID             string  `db:"agent_id"`
 		Timestamp           string  `db:"timestamp"`
 	}
 	var stored []storedRow
@@ -425,7 +511,7 @@ func (s *Store) FinalVerdictsForStep(stepID string) ([]ReviewVerdictRecord, erro
 		SELECT step_id, task_id, cycle, is_final, rubric_id, scope, category,
 		       severity, reviewed_model_id, judge_agent_id, judge_model_id,
 		       orchestrator_agent_id, orchestrator_model_id, confidence,
-		       trace_id, timestamp
+		       trace_id, agent_id, timestamp
 		FROM model_review_verdicts
 		WHERE step_id = ?
 		  AND cycle = (SELECT MAX(cycle) FROM model_review_verdicts WHERE step_id = ?)
@@ -455,6 +541,7 @@ func (s *Store) FinalVerdictsForStep(stepID string) ([]ReviewVerdictRecord, erro
 			OrchestratorModelID: r.OrchestratorModelID,
 			Confidence:          r.Confidence,
 			TraceID:             r.TraceID,
+			AgentID:             r.AgentID,
 			Timestamp:           ts,
 		})
 	}
