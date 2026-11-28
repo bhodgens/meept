@@ -43,6 +43,11 @@ type FTSConfig struct {
 	// content. Set true for stores whose content may be structured (e.g.
 	// distilled JSON payloads) so BM25 ranks words, not JSON syntax.
 	SearchTextColumn bool
+	// TimestampColumns lists the TEXT timestamp columns this table pads to
+	// fixed width in the #196 migration (per-store: task_memories has no
+	// last_accessed_at column, so listing columns per table keeps the
+	// padding SQL valid on every store shape).
+	TimestampColumns []string
 }
 
 // SQLiteFTSStore provides shared SQLite + FTS5 functionality.
@@ -389,6 +394,15 @@ func (s *SQLiteFTSStore) migrationRegistry() (*migrate.Registry, error) {
 			return pending > 0, nil
 		},
 	})
+	// #196: pad legacy variable-width timestamps (RFC3339Nano trimmed
+	// trailing fraction zeros, so lexical WHERE/ORDER BY inverted on
+	// trailing-zero collisions) to the fixed 30-char shape IsoTime
+	// writes. Runs after the column-add steps so created_at /
+	// last_accessed_at exist. Idempotent via the pending guard and the
+	// narrow legacy-shape WHERE clause. Episodic lands at version 7.
+	if len(s.config.TimestampColumns) > 0 {
+		steps = append(steps, s.padTimestampsStep(len(steps)+1))
+	}
 	return migrate.NewRegistry("memory/"+s.config.TableName, steps)
 }
 

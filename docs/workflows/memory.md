@@ -31,6 +31,26 @@ ws = 0.005
 
 ## Behavior
 
+### Timestamp Columns Are Fixed-Width (#196)
+
+Every timestamp column the memory stores compare lexically
+(`created_at`, `updated_at`, `last_accessed_at`, `last_activity`,
+knowledge `ingested_at`) is written through the fixed-width UTC layout
+`2006-01-02T15:04:05.000000000Z07:00` (`memory.IsoTime`, 30 chars, always
+9 fraction digits). The old writer `time.Format(time.RFC3339Nano)` trims
+trailing fraction zeros, so `.183300` became `.1833Z` (24 chars) — and
+because `'Z'` (0x5A) sorts above any digit, `WHERE created_at < / >=` and
+`ORDER BY created_at` silently inverted on nanosecond trailing-zero
+collisions. A numeric SQL comparison is NOT the fix:
+`unixepoch(x,'subsec')` on the modernc.org/sqlite driver truncates to
+milliseconds, which breaks strict boundary equality. Legacy rows are
+padded to the fixed shape once at store open (representation-only,
+idempotent; see `internal/migrate/timepad.go` — episodic/task via the
+registry's padding step, dual-store and knowledge via an open-time
+backfill). Readers keep `time.Parse(time.RFC3339Nano)` — it accepts both
+shapes. Pinned by `TestIsoTimeLexicalSort`,
+`TestDualStoreLegacyTimestampPadding`, `TestLegacyIngestedAtPadding`.
+
 ### Episodic Memory (FTS5)
 - **SQLite Full-Text Search**: BM25 ranking for keyword relevance
 - **Automatic Context Injection**: Based on recency and relevance

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/caimlas/meept/pkg/sqlite"
 	"github.com/jmoiron/sqlx"
 
@@ -26,6 +27,18 @@ import (
 
 // ErrNotFound is returned when a knowledge page does not exist.
 var ErrNotFound = errors.New("knowledge page not found")
+
+// isoTimeLayout / isoTime: fixed-width, lexically-sortable RFC3339 UTC
+// writer for the ingested_at column (issue #196). time.RFC3339Nano trims
+// trailing fraction zeros, so variable-width strings invert lexical
+// ORDER BY comparisons; the layout below always emits 9 fraction digits.
+// Mirrors internal/memory.IsoTime — kept package-local because importing
+// internal/memory here would create a cycle (knowledge -> tools/builtin ->
+// memory -> knowledge). Padded legacy rows parse back exactly with
+// time.RFC3339Nano.
+const isoTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+func isoTime(t time.Time) string { return t.UTC().Format(isoTimeLayout) }
 
 const (
 	createPagesTableSQL = `
@@ -138,6 +151,17 @@ func (s *Store) initSchema(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("create knowledge schema: %w", err)
 		}
+	}
+
+	// #196: pad legacy variable-width ingested_at values (RFC3339Nano
+	// trailing-zero trimming broke the lexical ORDER BY ingested_at
+	// eviction ordering) to the fixed 30-char shape isoTime writes.
+	// Idempotent: short legacy shapes only. Best-effort: a pad failure
+	// never bricks the store open.
+	if n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.db.DB, "knowledge_pages", "ingested_at"); err != nil {
+		s.logger.Warn("legacy timestamp padding failed (knowledge_pages)", "error", err)
+	} else if n > 0 {
+		s.logger.Info("legacy timestamps padded (knowledge_pages)", "rows", n)
 	}
 
 	if _, err := s.db.ExecContext(ctx, createKnowledgeFTSSQL); err != nil {

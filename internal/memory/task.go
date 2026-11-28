@@ -97,6 +97,7 @@ func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
 		SearchTextColumn: true,
 		Schema:           []string{createTaskTableSQL, createTaskFTSSQL},
 		Triggers:         []string{triggerTaskInsert, triggerTaskDelete, triggerTaskUpdate},
+		TimestampColumns: []string{"created_at"},
 	}
 
 	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
@@ -130,7 +131,7 @@ func (t *TaskMemory) Store(ctx context.Context, content, domain string, metadata
 	}
 
 	id := generateUUID()
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	nowISO := IsoTime(time.Now())
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
 	// search_text is the flattened text FTS indexes. For distilled JSON
