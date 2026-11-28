@@ -480,12 +480,32 @@ func extractPathFromToken(tok string) string {
 	// Split off the value side of assignment-shaped tokens: env-style
 	// KEY=VALUE and flag=value (--out=/path, -o=/path). Tokens that already
 	// start with "/" or "~" keep their whole form (legacy byte-identical:
-	// "/k=v" was always returned as-is) and so do bare "=" forms. Leading
-	// quote residue is trimmed so FOO='/etc/passwd' still exposes the path.
+	// "/k=v" was always returned as-is) and so do bare "=" forms.
+	//
+	// Bughunt 2026-11-27 S-8/F12: the quote trim was one-sided
+	// (TrimLeft), so KEY="'/etc/hosts'" extracted "/etc/hosts'" — a
+	// nonexistent path — instead of the quoted value the shell actually
+	// sees. Trim BOTH sides, but only when the value OPENS with a quote:
+	// a path legitimately containing a trailing quote character
+	// (create 'weird"name'.txt) must keep it, and the opening position is
+	// what the tokenizer guarantees for shell-quoted values.
 	value := tok
 	if !strings.HasPrefix(tok, "/") && !strings.HasPrefix(tok, "~") {
 		if idx := strings.IndexByte(tok, '='); idx >= 0 {
-			value = strings.TrimLeft(tok[idx+1:], "\"'")
+			value = tok[idx+1:]
+			// Strip balanced shell quotes (S-8/F12). Loop so a doubly
+			// quoted value (FOO="'/etc/hosts'") fully dequotes; an
+			// unbalanced opener (no closer) is left as-is — it is a
+			// shell syntax error and never reaches execution.
+			for len(value) > 0 && (value[0] == '"' || value[0] == '\'') {
+				q := value[0]
+				rest := value[1:]
+				i := strings.LastIndexByte(rest, q)
+				if i < 0 {
+					break
+				}
+				value = rest[:i] + rest[i+1:]
+			}
 		}
 	}
 	if value == "" {
