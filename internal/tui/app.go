@@ -2718,9 +2718,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 06-planning/01 session-load barrier: the authoritative
 		// transcript rebuild has landed (or errored), so daemon-state
 		// cards parked during the load window can render safely now.
-		a.chat.Update(msg)
+		// #197: since a41e99225 (M12 half B) ChatModel.Update returns
+		// the async dispatch_trace badge-hydration cmd for this msg;
+		// discarding it here meant the fetch never ran, so a restored
+		// transcript rendered no mode badges (F13c regression). The
+		// cmd must be scheduled, not swallowed.
+		hydrateCmd := a.chat.Update(msg)
 		a.drainParkedGateCards(msg.SessionID)
-		return a, nil
+		return a, hydrateCmd
 	}
 
 	// Handle slash autocomplete filter updates when typing
