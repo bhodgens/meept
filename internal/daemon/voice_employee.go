@@ -142,7 +142,7 @@ type VoiceEmployeeDeps struct {
 	// (components.go), so a voice turn cannot write outside its session
 	// root. Nil (tests / fence disabled) keeps the legacy posture: the
 	// clone inherits the template's un-fenced base checker.
-	FenceFactory func(rootPath string, noFence bool) security.FenceStage
+	FenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 
 	// SchedulerTZ is the daemon's [scheduler] timezone (C-8, stamp-clock
 	// fallback chain): used for the voice turn stamp when the bound
@@ -272,7 +272,7 @@ type loopTurnRunner struct {
 	// and arms at loop construction; this runner-side copy is the
 	// belt-and-suspenders arm for a manager wired without its factory
 	// (test Managers, wiring order). nil = the manager posture decides.
-	fenceFactory func(rootPath string, noFence bool) security.FenceStage
+	fenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 
 	// Prior-reasoning retention (voice lane): the LAST captured
 	// llm.Response.Reasoning from a voice turn on each session, bounded
@@ -478,7 +478,7 @@ func templateRegistry(loop *agent.AgentLoop) agent.ToolRegistry {
 // (composeLoopFence: session jail + additive group fs_roots) rooted at
 // the template's working directory, so an employee turn cannot write
 // outside its session root even though the clone is throwaway.
-type employeeTurnFence func(rootPath string, noFence bool) security.FenceStage
+type employeeTurnFence func(rootPath string, noFence bool, sessionID string) security.FenceStage
 
 func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID string, c *employee.Constitution, fence employeeTurnFence) *agent.AgentLoop {
 	if template == nil {
@@ -503,7 +503,7 @@ func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID str
 		if base == nil {
 			base = security.NewPermissionChecker(security.Config{})
 		}
-		if armed := agent.ComposeSessionFence(base, fence, template.GetWorkingDir(), noFence, clone.GroupResolution()); armed != nil {
+		if armed := agent.ComposeSessionFence(base, fence, template.GetWorkingDir(), noFence, conversationID, clone.GroupResolution()); armed != nil {
 			clone.SetSecurityChecker(armed)
 		}
 	}
@@ -706,7 +706,7 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		if base == nil {
 			base = security.NewPermissionChecker(security.Config{})
 		}
-		if armed := agent.ComposeSessionFence(base, r.fenceFactory, r.workingDir, false, loop.GroupResolution()); armed != nil {
+		if armed := agent.ComposeSessionFence(base, r.fenceFactory, r.workingDir, false, sess.ID, loop.GroupResolution()); armed != nil {
 			loop.SetSecurityChecker(armed)
 		}
 	}

@@ -54,7 +54,7 @@ func f2PinnedExecutor(t *testing.T, toolName string) *Executor {
 		return map[string]any{"ok": true}, nil
 	}))
 	base := security.NewPermissionChecker(security.Config{AllowedPaths: []string{"/"}})
-	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), f2JailDir(t), false, nil)
+	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), f2JailDir(t), false, "", nil)
 	if loop == nil || loop == base {
 		t.Fatal("composeLoopFence must install a per-session fenced clone")
 	}
@@ -172,7 +172,7 @@ func TestExecutor_TildeSSHPathHitsBlockedGlob(t *testing.T) {
 		AllowedPaths: []string{"/"},
 		BlockedPaths: []string{home + "/.ssh/**"},
 	})
-	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), f2JailDir(t), false, nil)
+	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), f2JailDir(t), false, "", nil)
 	e := NewExecutor(registry, loop)
 	jail := f2JailDir(t)
 

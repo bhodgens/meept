@@ -5264,8 +5264,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// mint, same gate as the ChatHandler/Dispatcher/step-job sites.
 	if c.AgentLoopManager != nil && cfg.Security.FenceEnabled {
 		fenceAllowRead := cfg.Security.FenceAllowRead
-		c.AgentLoopManager.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
+		c.AgentLoopManager.SetSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, sessionID, logger)
 		})
 	}
 
@@ -5859,13 +5859,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// beside the Manager-level arm above, so a voice clone can never
 			// end up on the template's un-fenced checker. Same gate: fence
 			// disabled (or nil factory) keeps the legacy posture.
-			FenceFactory: func() func(rootPath string, noFence bool) security.FenceStage {
+			FenceFactory: func() func(rootPath string, noFence bool, sessionID string) security.FenceStage {
 				if !cfg.Security.FenceEnabled {
 					return nil
 				}
 				voiceAllowRead := cfg.Security.FenceAllowRead
-				return func(rootPath string, noFence bool) security.FenceStage {
-					return agent.NewSessionFenceStage(rootPath, voiceAllowRead, noFence, logger)
+				return func(rootPath string, noFence bool, sessionID string) security.FenceStage {
+					return agent.NewSessionFenceStage(rootPath, voiceAllowRead, noFence, sessionID, logger)
 				}
 			}(),
 		}

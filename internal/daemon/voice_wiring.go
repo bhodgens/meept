@@ -295,7 +295,7 @@ type WireVoiceDeps struct {
 	// voice turn runner arms on its GetOrCreateWired clones. components.go
 	// passes the SAME closure the ChatHandler/Dispatcher sites receive.
 	// Nil (fence disabled / tests) keeps the legacy un-fenced posture.
-	FenceFactory func(rootPath string, noFence bool) security.FenceStage
+	FenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 	// LLMResolver is the daemon's alias resolver: the context-warm lane
 	// resolves the real turn's alias via PeekAliasForWarm (read-only) and
 	// carries the candidate on the per-request opts. Nil = the warm serves

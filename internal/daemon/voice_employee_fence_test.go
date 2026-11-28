@@ -23,8 +23,8 @@ import (
 
 // h4FenceMint mirrors the daemon's production mint (components.go): the
 // jail-carrying stage from agent.NewSessionFenceStage, rooted per session.
-func h4FenceMint(rootPath string, noFence bool) security.FenceStage {
-	return agent.NewSessionFenceStage(rootPath, []string{"/usr", "/bin", "/sbin", "/etc"}, noFence, slog.Default())
+func h4FenceMint(rootPath string, noFence bool, sessionID string) security.FenceStage {
+	return agent.NewSessionFenceStage(rootPath, []string{"/usr", "/bin", "/sbin", "/etc"}, noFence, sessionID, slog.Default())
 }
 
 // h4FencedTemplate builds a template loop the way the daemon does: base
@@ -97,8 +97,8 @@ func TestVoiceLoopTurnRunner_ArmsFence(t *testing.T) {
 	template := h4FencedTemplate(t, root)
 
 	mgr := agent.NewManager(agent.ManagerConfig{})
-	mgr.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-		return h4FenceMint(rootPath, noFence)
+	mgr.SetSessionFenceFactory(func(rootPath string, noFence bool, sessionID string) security.FenceStage {
+		return h4FenceMint(rootPath, noFence, sessionID)
 	})
 	runner := &loopTurnRunner{
 		mgr:          mgr,

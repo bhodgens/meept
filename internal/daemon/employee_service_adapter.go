@@ -297,12 +297,12 @@ type agentLoopBotExecutorAdapter struct {
 	// default/test posture) keeps the clones on the template's base
 	// checker — the daemon wires the SAME mint the chat/dispatch lanes
 	// receive so the jail posture cannot drift between lanes.
-	fenceFactory func(rootPath string, noFence bool) security.FenceStage
+	fenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 }
 
 // WithEmployeeFenceFactory wires the per-turn-clone fence mint (bughunt
 // H4/S-3). Returns the receiver for call chaining.
-func (a *agentLoopBotExecutorAdapter) WithEmployeeFenceFactory(f func(rootPath string, noFence bool) security.FenceStage) *agentLoopBotExecutorAdapter {
+func (a *agentLoopBotExecutorAdapter) WithEmployeeFenceFactory(f func(rootPath string, noFence bool, sessionID string) security.FenceStage) *agentLoopBotExecutorAdapter {
 	a.fenceFactory = f
 	return a
 }

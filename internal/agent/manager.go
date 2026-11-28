@@ -221,7 +221,7 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 		if base == nil {
 			base = security.NewPermissionChecker(security.Config{})
 		}
-		if fence := composeLoopFence(base, m.fenceFactory, workingDir, noFence, loop.GroupResolution()); fence != nil {
+		if fence := composeLoopFence(base, m.fenceFactory, workingDir, noFence, sessionID, loop.GroupResolution()); fence != nil {
 			loop.SetSecurityChecker(fence)
 		}
 	}

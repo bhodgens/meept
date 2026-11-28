@@ -38,7 +38,7 @@ func TestEagerBodiesDefault_KeepsJailOnFileRead(t *testing.T) {
 	if base == nil {
 		base = security.NewPermissionChecker(security.Config{})
 	}
-	fenced := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), jail, false, loop.GroupResolution())
+	fenced := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), jail, false, "", loop.GroupResolution())
 	if fenced == nil || fenced == base {
 		t.Fatal("composeLoopFence must install a fenced clone")
 	}
