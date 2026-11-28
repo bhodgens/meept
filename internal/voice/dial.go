@@ -356,10 +356,16 @@ type Dialer struct {
 	hold func(ccid, employeeID string)
 
 	mu       sync.Mutex
-	timers   map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
-	answered map[string]bool          // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
-	dones    map[string]chan struct{} // ccid -> terminal channel (closed once)
-	fin      map[string]bool          // ccid -> terminal cleanup already ran (bughunt 2026-11-25 A7-1: dropped with a TTL sweep — the latch only has to outlive a terminal-fire race, not the daemon)
+	timers   map[string]*time.Timer // ccid -> no-answer timer (stopped on answered)
+	answered map[string]bool        // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
+	// answeredSeenNano pairs with answered: ccid -> unix-nano the marker
+	// was (re-)set, so the terminal sweep can age out STRAGGLER markers —
+	// re-marks that landed after their fin latch was already pruned
+	// (bughunt 2026-11-27 L14/T-3: the only such markers a normal
+	// terminal cleanup can never see) instead of carrying them forever.
+	answeredSeenNano map[string]int64
+	dones            map[string]chan struct{} // ccid -> terminal channel (closed once)
+	fin              map[string]bool          // ccid -> terminal cleanup already ran (bughunt 2026-11-25 A7-1: dropped with a TTL sweep — the latch only has to outlive a terminal-fire race, not the daemon)
 	// finSeenNano pairs with fin: ccid -> unix-nano the latch was set, so
 	// the bounded sweep can age entries out.
 	finSeenNano map[string]int64
@@ -415,8 +421,11 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		hold:     cfg.Hold,
 		timers:   make(map[string]*time.Timer),
 		answered: make(map[string]bool),
-		dones:    make(map[string]chan struct{}),
-		fin:      make(map[string]bool),
+		// L14/T-3: answered-marker set-times ride the paired map the
+		// terminal sweep prunes straggler markers against.
+		answeredSeenNano: make(map[string]int64),
+		dones:            make(map[string]chan struct{}),
+		fin:              make(map[string]bool),
 		// A7-1: fin latch set-times ride the paired map the terminal
 		// sweep prunes against finLatchRetention.
 		finSeenNano:            make(map[string]int64),
@@ -1025,6 +1034,14 @@ func (d *Dialer) NotifyAnswered(ccid string) {
 	// answered marker after finishCall's delete — that would leak the
 	// entry for the ccid's whole daemon life.
 	if !d.fin[ccid] {
+		// bughunt 2026-11-27 L14/T-3: stamp the set time so the
+		// finishCall sweep can age this entry out if it turns out to
+		// be a straggler (re-mark after the fin latch was pruned).
+		if d.answeredSeenNano == nil {
+			d.answeredSeenNano = make(map[string]int64)
+		}
+		now := time.Now()
+		d.answeredSeenNano[ccid] = now.UnixNano()
 		d.answered[ccid] = true
 	}
 	timer := d.timers[ccid]
@@ -1047,6 +1064,20 @@ func (d *Dialer) NotifyAnswered(ccid string) {
 // mirroring the per-call delete of the adjacent answered map: the map is
 // size-stable (bounded by dials-within-the-retention-window) while every
 // race the latch exists to absorb stays covered.
+//
+// bughunt 2026-11-27 L14/T-3 — the prune re-opened the F-2 leak one level
+// up: a call.answered webhook arriving AFTER the latch was pruned passes
+// NotifyAnswered's fin guard and re-marks answered[ccid] with no future
+// finishCall ever running for it (the call is already terminal). The sweep
+// therefore prunes straggler answered markers by their OWN set-time
+// (answeredSeenNano) in the same pass — a marker whose FIN latch is still
+// inside the window is never dropped (its NotifyAnswered/terminal race is
+// still live), and a pruned latch's re-mark survives until it has itself
+// aged past the window. Both maps stay bounded by
+// dials-plus-late-webhooks-within-the-retention-window, and the F-2
+// invariant ("a post-finishCall marker must not leak for the daemon's
+// whole life") holds again: a straggler marker now has a bounded life of
+// finLatchRetention from ITS re-mark, not forever.
 func (d *Dialer) finishCall(ccid string) {
 	now := time.Now()
 	d.mu.Lock()
@@ -1063,11 +1094,21 @@ func (d *Dialer) finishCall(ccid string) {
 		if now.Sub(time.Unix(0, seen)) > d.finRetention() {
 			delete(d.finSeenNano, id)
 			delete(d.fin, id)
-			// A pruned latch can no longer block a LATE NotifyAnswered
-			// from re-marking the ccid (the fin[ccid] guard in
-			// NotifyAnswered reads the latch); drop any straggler
-			// answered marker in the same sweep so neither map grows
-			// across the dial history.
+		}
+	}
+	// bughunt 2026-11-27 L14/T-3: straggler answered markers age out on
+	// their OWN stamp. A marker re-set by NotifyAnswered AFTER its fin
+	// latch was pruned (a >1h-late call.answered webhook — the F-2 guard
+	// deliberately lets it through) has no future finishCall for its
+	// ccid, so the keyed delete below can never reap it; sweeping by the
+	// marker's own set-time gives it the same bounded life the latch has.
+	// A FRESH marker (< retention since its re-mark) is never pruned
+	// early: the NotifyAnswered-vs-terminal race it guards may still be
+	// open, and its consumers (the fire-time re-check, the arm-site
+	// skip) all live inside the no-answer timer window anyway.
+	for id, ts := range d.answeredSeenNano {
+		if now.Sub(time.Unix(0, ts)) > d.finRetention() {
+			delete(d.answeredSeenNano, id)
 			delete(d.answered, id)
 		}
 	}
@@ -1078,6 +1119,7 @@ func (d *Dialer) finishCall(ccid string) {
 	// bookkeeping; drop it at terminal cleanup so the map cannot grow
 	// across the daemon's dial history.
 	delete(d.answered, ccid)
+	delete(d.answeredSeenNano, ccid)
 	d.mu.Unlock()
 
 	d.reg.Release(ccid)
@@ -1089,6 +1131,16 @@ func (d *Dialer) finishCall(ccid string) {
 // finRetention is the effective TTL of a fin latch entry (a var-backed
 // seam so tests can shrink the window and prove the prune fires; the
 // default comfortably outlives the no-answer timer's race window).
+//
+// bughunt 2026-11-27 L14/T-3: the SAME window bounds the life of a
+// straggler answered marker (one re-marked by NotifyAnswered after its fin
+// latch was pruned — a >1h-late call.answered webhook under the default).
+// Telnyx anticipates redelivery storms, so the horizon deliberately
+// exceeds any past-skew bound; the default of 1h means a late webhook's
+// marker survives at most 1h from its own arrival before a later
+// finishCall's sweep reaps it, and a marker whose fin latch is still
+// inside the window is never pruned early (the F-2 race it guards is
+// still open).
 var finLatchRetention = time.Hour
 
 func (d *Dialer) finRetention() time.Duration {

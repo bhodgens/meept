@@ -125,6 +125,98 @@ func TestDialerFinLatchExactlyOnceWithinWindow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// bughunt 2026-11-27 L14/T-3: the fin prune re-opened the F-2 answered leak
+// for >1h-late call.answered webhooks. Pins: (1) a re-mark landed AFTER its
+// fin latch was pruned (the straggler shape) is reaped by a later
+// finishCall's sweep once IT ages past the window — the leak is closed and
+// the map stays bounded; (2) a marker whose fin latch is still inside the
+// window is never pruned early (the NotifyAnswered-vs-terminal race it
+// guards is still open).
+// ---------------------------------------------------------------------------
+
+// TestDialerStragglerAnsweredMarkerPruned pins the leak fix: finishCall
+// (prunes the latch via a following sweep) -> a late NotifyAnswered
+// re-marks the ccid (passes the now-absent fin guard, exactly the
+// >1h-late webhook shape) -> the re-mark ages past the window -> a later
+// finishCall sweep reaps the straggler. The old shape left answered[ccid]
+// set for the daemon's whole life.
+func TestDialerStragglerAnsweredMarkerPruned(t *testing.T) {
+	orig := finLatchRetention
+	finLatchRetention = 10 * time.Millisecond
+	t.Cleanup(func() { finLatchRetention = orig })
+
+	tel := &countingController{}
+	cfg := dialConfig()
+	cfg.TimeoutSecs = 3600
+	reg := NewRegistry(0)
+	d := NewDialer(cfg, tel, nil, reg, newTestLedger(t), nil, testLogger())
+	target := cfg.AllowedNumbers[0]
+
+	dial := func(reqID string) string {
+		res, err := d.Dial(context.Background(), DialRequest{
+			EmployeeID: "emp-l14", Target: target, RequestID: reqID,
+		})
+		if err != nil {
+			t.Fatalf("Dial %s: %v", reqID, err)
+		}
+		return res.CallControlID
+	}
+
+	ccid := dial("req-l14-1")
+	d.finishCall(ccid) // terminal cleanup; latch stamped
+
+	// Age the latch past the window and drive a sweep (unrelated call's
+	// finishCall): the latch is now PRUNED, so a late webhook passes the
+	// fin guard — the true straggler shape.
+	d.mu.Lock()
+	if ts, ok := d.finSeenNano[ccid]; ok {
+		d.finSeenNano[ccid] = ts - int64(time.Second)
+	}
+	d.mu.Unlock()
+	sweeper := dial("req-l14-sweep0")
+	d.finishCall(sweeper)
+
+	d.NotifyAnswered(ccid) // passes the pruned guard: re-marks
+
+	d.mu.Lock()
+	marked := d.answered[ccid]
+	d.mu.Unlock()
+	if !marked {
+		t.Fatal("precondition failed: late NotifyAnswered did not re-mark (test no longer exercises the straggler shape)")
+	}
+
+	// FRESH sub-pin: an unrelated sweep immediately after the re-mark
+	// must NOT reap it — a marker's bounded life runs from ITS OWN
+	// set-time, not from some other call's terminal.
+	sweeper = dial("req-l14-sweep1")
+	d.finishCall(sweeper)
+	d.mu.Lock()
+	marked = d.answered[ccid]
+	d.mu.Unlock()
+	if !marked {
+		t.Fatal("fresh straggler re-mark reaped by an unrelated sweep before its own window elapsed")
+	}
+
+	// Age the STRAGGLER MARKER (not a fin latch) past the window, then
+	// drive one more sweep: the straggler must go.
+	d.mu.Lock()
+	if ts, ok := d.answeredSeenNano[ccid]; ok {
+		d.answeredSeenNano[ccid] = ts - int64(time.Second)
+	}
+	d.mu.Unlock()
+	sweeper = dial("req-l14-sweep2")
+	d.finishCall(sweeper)
+
+	d.mu.Lock()
+	straggler := d.answered[ccid]
+	_, stragglerStamp := d.answeredSeenNano[ccid]
+	d.mu.Unlock()
+	if straggler || stragglerStamp {
+		t.Fatalf("straggler answered marker for %s survived the sweep (L14 leak: lives for the daemon's whole life)", ccid)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // D4/A7-2: loud, queryable provider outages (attempt-based cap preserved)
 // ---------------------------------------------------------------------------
 
