@@ -520,3 +520,94 @@ func TestSemanticCacheVerifyBandExactTieKeyAsc(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// bughunt 2026-11-27 L12 pins: the STAGE-1 above-threshold winner must
+// resolve by (score desc, key asc), never by Go map iteration order, and
+// the comparison operator must agree with the verify band's >= serve rule.
+// Run the package with -count=5: the old last-visited-wins shape flakes
+// the tie pin under Go's randomized map range.
+// ---------------------------------------------------------------------------
+
+// TestSemanticCacheStage1ExactTieKeyAsc pins the stage-1 tie rule: two
+// mirror candidates at IDENTICAL scores (query at 0 deg, candidates at
+// +/-31.5 deg, both cos 31.5 deg ~ 0.853 — above Threshold=0.85) resolve
+// by key ASC on every run. The old shape served whichever row the map
+// range visited last: a 50/50 flip across identical requests.
+func TestSemanticCacheStage1ExactTieKeyAsc(t *testing.T) {
+	emb := &seqEmbedder{embed: func(int) ([]float32, error) {
+		return bandVec(0), nil // query direction on every embed
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.85})
+	wantResp := &Response{Content: "tie-a"}
+	cache.mu.Lock()
+	cache.entries["m tie-a"] = &semanticEntry{vector: bandVec(31.5), response: wantResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m tie-b"] = &semanticEntry{vector: bandVec(-31.5), response: &Response{Content: "tie-b"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	for i := range 20 {
+		resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "stage1 tie probe")
+		if err != nil {
+			t.Fatalf("iteration %d: LookupBehindMiss errored: %v", i, err)
+		}
+		if !hit || resp != wantResp {
+			t.Fatalf("iteration %d: hit=%v resp=%v, want key-asc tie winner tie-a served every run (L12 map-order nondeterminism)", i, hit, resp)
+		}
+	}
+}
+
+// TestSemanticCacheStage1TieGoesToBetterScoreNotMapOrder pins the score-desc
+// half with a THIRD candidate that beats the tied pair: winners must come
+// from score ranking first, key asc only among equals, across repeated
+// runs (map-order stress).
+func TestSemanticCacheStage1TieGoesToBetterScoreNotMapOrder(t *testing.T) {
+	emb := &seqEmbedder{embed: func(int) ([]float32, error) {
+		return bandVec(0), nil
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.85})
+	wantResp := &Response{Content: "winner-close"}
+	cache.mu.Lock()
+	cache.entries["m tie-a"] = &semanticEntry{vector: bandVec(31.5), response: &Response{Content: "tied-loser-a"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m tie-b"] = &semanticEntry{vector: bandVec(-31.5), response: &Response{Content: "tied-loser-b"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m close"] = &semanticEntry{vector: bandVec(8), response: wantResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	for i := range 20 {
+		resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "stage1 rank probe")
+		if err != nil {
+			t.Fatalf("iteration %d: LookupBehindMiss errored: %v", i, err)
+		}
+		if !hit || resp != wantResp {
+			t.Fatalf("iteration %d: hit=%v resp=%v, want the strictly-best score served every run (L12 score-desc rule)", i, hit, resp)
+		}
+	}
+}
+
+// TestSemanticCacheStage1ThresholdTieStaysOut pins the operator alignment:
+// a candidate scoring EXACTLY at Threshold must NOT serve from stage 1 —
+// the floor keeps strict-`>` semantics ("exact ties stay out", which is
+// the stage-1 form of the verify band's `>= Threshold` acceptance from
+// below; the two operators describe the same boundary, pinned here so
+// neither side drifts). Constructed exactly: Threshold=1.0 with an
+// identical unit-axis vector pair gives cosine == float32(1.0) — a true
+// tie with the seeded floor — so any drift to `>=`-at-seed serves and
+// fails this pin. With no VerifyFloor band the lookup misses outright.
+func TestSemanticCacheStage1ThresholdTieStaysOut(t *testing.T) {
+	emb := &seqEmbedder{embed: func(int) ([]float32, error) {
+		return []float32{1, 0, 0, 0, 0, 0, 0, 0}, nil
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 1.0})
+	cache.mu.Lock()
+	cache.entries["m exact"] = &semanticEntry{vector: []float32{1, 0, 0, 0, 0, 0, 0, 0}, response: &Response{Content: "at-threshold"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	for i := range 5 {
+		resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "threshold tie probe")
+		if err != nil {
+			t.Fatalf("iteration %d: LookupBehindMiss errored: %v", i, err)
+		}
+		if hit || resp != nil {
+			t.Fatalf("iteration %d: exact-threshold tie served (hit=%v), want it kept out (L12 operator alignment)", i, hit)
+		}
+	}
+}

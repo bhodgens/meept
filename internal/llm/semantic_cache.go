@@ -185,6 +185,15 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 	now := time.Now()
 	part := s.partition(modelID)
 	// Strict-greater compare against the floor: exact ties stay out.
+	// bughunt 2026-11-27 L12 (audit L-5): the WINNER tie-break below is
+	// deterministic (score desc, then key asc — the same (cost asc,
+	// alias-id asc) stable-sort discipline as the verify band's A3-7
+	// rule, keyed by the entry's stable storage key since entries carry
+	// no cost/alias fields), and `>=` vs `>` is aligned between the
+	// stage-1 serve comparison and the stage-2 verify band (verify
+	// accepts `>= Threshold` at verifyBehindBand; the semantically-equal
+	// `score > bestScore` with `bestScore` seeded at the threshold is the
+	// stage-1 form of the same `>=` rule).
 	bestScore := float32(s.cfg.Threshold)
 	var bestKey string
 	var bestResp *Response
@@ -213,7 +222,7 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 			s.removeLocked(key)
 			continue
 		}
-		if score := cosineSimilarity(vec, e.vector); score > bestScore {
+		if score := cosineSimilarity(vec, e.vector); score > bestScore || (score == bestScore && bestResp != nil && key < bestKey) {
 			// Serve-side tool-call exemption (leaf 02 hard
 			// constraint): never serve a response carrying tool
 			// calls, even if a dirty/legacy row made it into the
@@ -221,6 +230,13 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 			if e.response == nil || e.response.HasToolCalls() {
 				continue
 			}
+			// bughunt 2026-11-27 L12 (audit L-5): EXACT-tie winner
+			// resolution is key asc — never "whichever entry the Go
+			// map range visited last". bestResp is only non-nil once a
+			// servable candidate has won, so the tie branch cannot
+			// fire on the threshold seed (which must keep strict `>`
+			// semantics: an exact-threshold tie stays OUT, mirroring
+			// the verify band's `>=` serve rule from below).
 			bestScore = score
 			bestKey = key
 			bestResp = e.response
