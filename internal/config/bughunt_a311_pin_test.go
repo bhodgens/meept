@@ -102,11 +102,18 @@ func TestStringDurationKeys_A311_FullSchemaCoverage(t *testing.T) {
 	}
 }
 
-var durShapeKey = regexp.MustCompile(`(?i)(interval|duration|window|_ttl|^ttl|timeout|expiry|margin|retention)`)
+var durShapeKey = regexp.MustCompile(`(?i)(interval|duration|window|_ttl|^ttl|timeout|expiry|margin|retention|period|every|cooldown|backoff|stale_after|max_age|grace|delay|wait)`)
 
 // walkStringDurationFields recursively collects json-tag names of string
 // fields whose names look like durations. Recursion is type-guarded
 // (cycles through pointer/shared structs cannot loop forever).
+//
+// Bughunt 2026-11-27 S-9/F12: the walk previously recursed only through
+// Ptr/Slice/Struct, so a duration-string nested under a map-of-struct
+// config section (lsp.servers.*, providers.*, agents.backoff.*) was
+// invisible, and the shape regex missed period/every/cooldown/backoff/
+// stale_after/max_age/grace/delay/wait. Map VALUES that resolve to
+// structs are now walked too.
 func walkStringDurationFields(t *testing.T, typ reflect.Type, out map[string]bool, seen map[reflect.Type]bool) {
 	t.Helper()
 	for typ.Kind() == reflect.Ptr {
@@ -121,6 +128,22 @@ func walkStringDurationFields(t *testing.T, typ reflect.Type, out map[string]boo
 		ft := f.Type
 		for ft.Kind() == reflect.Ptr || ft.Kind() == reflect.Slice {
 			ft = ft.Elem()
+		}
+		// Map-of-struct config sections (S-9): walk the VALUE type so a
+		// string-duration field inside e.g. map[string]ServerConfig is
+		// discovered exactly like a nested struct field. (Note: unlike
+		// the struct-field recursion below, there is NO PkgPath guard
+		// here — for a named struct type PkgPath is the package path,
+		// not an unexported marker, so the guard would skip every
+		// same-package map leaf.)
+		if ft.Kind() == reflect.Map {
+			mt := ft.Elem()
+			for mt.Kind() == reflect.Ptr {
+				mt = mt.Elem()
+			}
+			if mt.Kind() == reflect.Struct {
+				walkStringDurationFields(t, mt, out, seen)
+			}
 		}
 		tag := strings.Split(f.Tag.Get("json"), ",")[0]
 		if tag == "" || tag == "-" {
