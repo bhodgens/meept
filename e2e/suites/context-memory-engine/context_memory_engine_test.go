@@ -13,9 +13,10 @@
 //	  wires it. A live scratch daemon boots with
 //	  agent.context_assembler.enabled=true first, proving the config is
 //	  accepted (no config validation failure) before the in-process drive.
-//	cme-assembler-02 assembler DISABLED (default): the same fixture renders
-//	  CLAUDE.md verbatim-unbounded (today's byte shape, opt-in safety) and
-//	  the seam helpers report today's path.
+//	cme-assembler-02 assembler DISABLED: the default seam-off doc section
+//	  is BUDGETED (#193 increment 2 — truncation notice, tail trimmed), and
+//	  the ArtifactContextWholeDoc escape hatch reproduces the legacy
+//	  verbatim-unbounded byte shape.
 //	cme-working-01 working-tier ring overflow queues evicted turns and a
 //	  Flush lands them in the REAL FTS5 episodic store through the REAL
 //	  EpisodicSinkAdapter; nothing is dropped.
@@ -204,6 +205,30 @@ func cmeAssemblerLoop(t *testing.T, workDir string, enabled bool, prov contextal
 	return loop
 }
 
+// cmeWholeDocLoop is cmeAssemblerLoop plus the #193-increment-2
+// ArtifactContextWholeDoc escape hatch: the unbounded verbatim CLAUDE.md
+// dump that was the pre-#193 seam-off default is now opt-in, and
+// cme-assembler-02 pins THAT legacy byte shape through the hatch.
+func cmeWholeDocLoop(t *testing.T, workDir string, prov contextalloc.TierBudgetProvider, chat *cmeChatter) *agent.AgentLoop {
+	t.Helper()
+	cfg := agent.DefaultAgentConfig()
+	cfg.ArtifactContextWholeDoc = true
+	loop := agent.NewAgentLoop("cme-session", workDir,
+		agent.WithLLMChatter(chat),
+		agent.WithArtifactManager(agent.NewArtifactManager(slog.New(slog.DiscardHandler))),
+		agent.WithLoopLogger(slog.New(slog.DiscardHandler)),
+		agent.WithAgentConfig(cfg),
+	)
+	loop.SetContextAssemblerConfig(config.ContextAssemblerConfig{Enabled: false})
+	if prov != nil {
+		loop.SetTierBudgetProvider(prov)
+	}
+	loop.SetContextFirewallConfig(config.LLMContextFirewallConfig{
+		ModelContextLimit: 20000,
+	})
+	return loop
+}
+
 // ---------------------------------------------------------------------------
 // cme-assembler-01 (M): assembler enabled = budgets respected + docs trimmed
 // ---------------------------------------------------------------------------
@@ -316,14 +341,18 @@ func cmeDaemonLogTail(s *harness.Stack) string {
 }
 
 // ---------------------------------------------------------------------------
-// cme-assembler-02 (M): assembler disabled (default) = byte-identical legacy
+// cme-assembler-02 (M): assembler disabled = DEFAULT doc posture (#193
+// increment 2: bounded via DefaultDocBudgetTokens) + the ArtifactContextWholeDoc
+// escape hatch restores the legacy verbatim dump byte-for-byte
 // ---------------------------------------------------------------------------
 
 // TestAssemblerDisabledDefault drives the SAME fixture with the assembler
-// at its zero value: the doc section is the unbounded builder's output
-// (CLAUDE.md verbatim, tail sentinel PRESENT, no truncation notice), the
-// seam helpers report today's path, and no tier recall replaces the legacy
-// memory path (memvid nil => no memory section).
+// at its zero value. Posture split (both owned by #193 increment 2): the
+// DEFAULT seam-off path is budgeted (truncation notice, tail sentinel
+// trimmed) so a huge CLAUDE.md cannot eat the window, while the
+// ArtifactContextWholeDoc escape hatch reproduces the pre-increment
+// verbatim-unbounded legacy shape (tail sentinel PRESENT, no notice). The
+// legacy memory path (memvid nil) still injects nothing in both postures.
 func TestAssemblerDisabledDefault(t *testing.T) {
 	ctx := context.Background()
 	// The daemon boots with NO overlay: default config must arm nothing.
@@ -347,6 +376,8 @@ func TestAssemblerDisabledDefault(t *testing.T) {
 	})
 
 	chat := &cmeChatter{resp: &llm.Response{Content: "legacy", FinishReason: "stop"}}
+	// Default seam-off posture (#193 increment 2): the doc section is
+	// BUDGETED, not verbatim — huge CLAUDE.md can no longer eat the window.
 	loop := cmeAssemblerLoop(t, workDir, false, prov, chat)
 
 	resp, err := loop.RunWithTask(ctx, &task.Task{
@@ -365,17 +396,43 @@ func TestAssemblerDisabledDefault(t *testing.T) {
 	}
 	prompt := chat.seen[len(chat.seen)-1]
 
-	// Verbatim-unbounded doc: today's behavior, opt-in safety proven.
-	if !strings.Contains(prompt, cmeDocTailSentinel) {
-		t.Fatal("cme-assembler-02: disabled path lost the verbatim CLAUDE.md tail")
+	// Budgeted doc: truncation notice PRESENT, unbounded tail trimmed.
+	if !strings.Contains(prompt, "[... CLAUDE.md truncated:") {
+		t.Fatal("cme-assembler-02: default seam-off path lost the doc budget — expected the truncation notice")
 	}
-	if strings.Contains(prompt, "[... CLAUDE.md truncated:") {
-		t.Fatal("cme-assembler-02: disabled path applied a doc budget it must not have")
+	if strings.Contains(prompt, cmeDocTailSentinel) {
+		t.Fatal("cme-assembler-02: default seam-off path kept the unbounded CLAUDE.md tail")
 	}
 	// The legacy memory path (memvid nil) injects nothing, so the working
 	// recall must NOT replace it.
 	if strings.Contains(prompt, "- the quorum budget for scenario alpha is seven tokens") {
 		t.Fatal("cme-assembler-02: tier recall leaked into the disabled path")
+	}
+
+	// Escape-hatch posture: ArtifactContextWholeDoc restores the
+	// pre-increment verbatim-unbounded byte shape exactly (tail sentinel
+	// PRESENT, no truncation notice) with the assembler still off.
+	chatH := &cmeChatter{resp: &llm.Response{Content: "legacy", FinishReason: "stop"}}
+	loopH := cmeWholeDocLoop(t, workDir, prov, chatH)
+	if _, err := loopH.RunWithTask(ctx, &task.Task{
+		ID:           "task-cme-02h",
+		Name:         "exercise the whole-doc escape hatch",
+		ContextQuery: "quorum budget scenario alpha",
+	}); err != nil {
+		t.Fatalf("cme-assembler-02 (hatch): RunWithTask: %v", err)
+	}
+	if len(chatH.seen) == 0 {
+		t.Fatal("cme-assembler-02 (hatch): no prompt reached the stub chatter")
+	}
+	hatchPrompt := chatH.seen[len(chatH.seen)-1]
+	if !strings.Contains(hatchPrompt, cmeDocTailSentinel) {
+		t.Fatal("cme-assembler-02 (hatch): escape hatch lost the verbatim CLAUDE.md tail")
+	}
+	if strings.Contains(hatchPrompt, "[... CLAUDE.md truncated:") {
+		t.Fatal("cme-assembler-02 (hatch): escape hatch applied a doc budget it must not apply")
+	}
+	if strings.Contains(hatchPrompt, "- the quorum budget for scenario alpha is seven tokens") {
+		t.Fatal("cme-assembler-02 (hatch): tier recall leaked into the disabled path")
 	}
 	_ = fixture
 }
