@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/migrate"
 )
 
 // mustNewEpisodicMemory wraps NewEpisodicMemory with a t.Fatalf on error,
@@ -507,10 +510,10 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 		}
 	}
 	if older.Equal(newer) {
-		// RFC3339Nano trims trailing zeros; on fast machines (or VMs with
-		// coarse clocks) two back-to-back Stores can serialize to the same
-		// timestamp, making a strict boundary untestable at this
-		// granularity.
+		// Timestamps are fixed-width since #196, so two back-to-back
+		// Stores collide only when the clock genuinely reads the same
+		// nanosecond (coarse-clock VMs), making a strict boundary
+		// untestable at that granularity.
 		t.Skip("both memories share one timestamp; boundary granularity not testable")
 	}
 	// Strict < cutoff with cutoff = newer.CreatedAt: Memory 1 (older) must
@@ -683,5 +686,276 @@ func TestEpisodicMemoryStoreDefaultVersioning(t *testing.T) {
 	}
 	if isCurrent != 1 {
 		t.Errorf("Expected default is_current=1, got %d", isCurrent)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Issue #196 pins: fixed-width RFC3339 timestamp writer + legacy-row padding
+// migration. See isoTimeLayout / IsoTime in timeformat.go.
+// ---------------------------------------------------------------------------
+
+// legacyRFC3339Nano emulates the pre-fix writer: time.Format(time.RFC3339Nano)
+// trims trailing fraction zeros, producing variable-width strings.
+func legacyRFC3339Nano(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// TestIsoTimeLexicalSort pins the #196 fix contract:
+// (a) fixed-width output, lexically ordered at 1ns granularity — including
+// the exact trailing-zero collision shapes from the RCA;
+// (b) legacy rows written by the OLD variable-width writer are repaired by
+// the migration, after which GetOldMemories and ORDER BY agree with time
+// semantics on the collision pair;
+// (c) IsoTime roundtrips exactly through time.Parse(time.RFC3339Nano);
+// (d) the padding migration is idempotent.
+func TestIsoTimeLexicalSort(t *testing.T) {
+	ctx := context.Background()
+
+	// --- (a) fixed width + lexical order on the RCA collision shapes ---
+	// base = ...01:08:12.1833 exactly (trailing zeros .183300): the shape
+	// RFC3339Nano trims to '...12.1833Z' (24 chars).
+	base := time.Date(2026, 11, 28, 1, 8, 12, 183300000, time.UTC)
+	collide := base.Add(88 * time.Microsecond) // .183388 -> '...183388Z' (26 chars)
+	oneNs := base.Add(time.Nanosecond)         // .183300001
+
+	if got := len(IsoTime(base)); got != isoTimeLen {
+		t.Fatalf("IsoTime width = %d, want fixed %d", got, isoTimeLen)
+	}
+	for _, pair := range [][2]time.Time{{base, collide}, {base, oneNs}, {oneNs, collide}} {
+		lo, hi := IsoTime(pair[0]), IsoTime(pair[1])
+		if len(lo) != len(hi) {
+			t.Fatalf("IsoTime variable width: %q (%d) vs %q (%d)", lo, len(lo), hi, len(hi))
+		}
+		if !(lo < hi) {
+			t.Errorf("lexical order broken: %q !< %q", lo, hi)
+		}
+	}
+	// Prove the pin exercises the real bug shape: the OLD writer INVERTS —
+	// the older instant ('...1833Z') sorts lexically ABOVE the later one
+	// because 'Z' (0x5A) > any digit at the first differing character.
+	if !(legacyRFC3339Nano(base) > legacyRFC3339Nano(oneNs)) {
+		t.Errorf("sanity: legacy RFC3339Nano shapes should invert (older %q should sort ABOVE newer %q), got in order",
+			legacyRFC3339Nano(base), legacyRFC3339Nano(oneNs))
+	}
+
+	// --- (c) roundtrip through the reader layout (readers stay RFC3339Nano) ---
+	for _, x := range []time.Time{base, collide, oneNs, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)} {
+		back, err := time.Parse(time.RFC3339Nano, IsoTime(x))
+		if err != nil {
+			t.Fatalf("IsoTime(%v) unparseable as RFC3339Nano: %v", x, err)
+		}
+		if !back.Equal(x) {
+			t.Errorf("roundtrip changed value: %v -> %q -> %v", x, IsoTime(x), back)
+		}
+	}
+
+	// --- (b) legacy rows + migration repair ---
+	// Build the store's DB by hand with the OLD writer shapes (the exact
+	// collision pair from the RCA), then let Initialize run the #196
+	// migration step, then assert query semantics.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "episodic_memories.db")
+	seed, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open seed db: %v", err)
+	}
+	if _, err := seed.Exec(createEpisodicTableSQL); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	olderRaw := legacyRFC3339Nano(base)    // '...12.1833Z'   (24 chars, TRIMMED)
+	newerRaw := legacyRFC3339Nano(collide) // '...12.183388Z' (26 chars)
+	if olderRaw == IsoTime(base) {
+		t.Fatal("pin precondition: legacy shape must differ from padded shape")
+	}
+	for _, row := range []struct{ id, content, ts string }{
+		{"legacy-older", "Memory 1", olderRaw},
+		{"legacy-newer", "Memory 2", newerRaw},
+	} {
+		if _, err := seed.Exec(
+			`INSERT INTO episodic_memories (id, content, category, metadata_json, created_at, last_accessed_at)
+			 VALUES (?, ?, 'conversation', '{}', ?, '')`,
+			row.id, row.content, row.ts); err != nil {
+			t.Fatalf("insert legacy row %s: %v", row.id, err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed db: %v", err)
+	}
+
+	// Pre-migration: the RCA inversion is live in SQL. 'legacy-older' has
+	// the SHORTER string that sorts ABOVE the longer one.
+	{
+		check, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatalf("reopen pre-migration: %v", err)
+		}
+		var inverted int
+		if err := check.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM episodic_memories
+			 WHERE id = 'legacy-older' AND created_at >= ?`, IsoTime(collide)).Scan(&inverted); err != nil {
+			t.Fatalf("pre-migration probe: %v", err)
+		}
+		if inverted != 1 {
+			t.Errorf("pre-migration sanity: legacy trimmed row should lexically sort ABOVE the padded cutoff (the #196 bug), got %d", inverted)
+		}
+		check.Close()
+	}
+
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{DataDir: dir})
+	if err := mem.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize on legacy db: %v", err)
+	}
+	defer mem.Close()
+
+	db := mem.store.GetDB()
+
+	// Migration rewrote both representations, and rewrote VALUES not
+	// instants: exactly IsoTime(original instant) stored now.
+	for id, want := range map[string]string{
+		"legacy-older": IsoTime(base),
+		"legacy-newer": IsoTime(collide),
+	} {
+		var got string
+		if err := db.QueryRowContext(ctx,
+			`SELECT created_at FROM episodic_memories WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("migrated %s created_at = %q, want %q", id, got, want)
+		}
+	}
+
+	// The RCA failure mode, now fixed: strict cutoff at the newer instant
+	// must return the OLDER row.
+	results, err := mem.GetOldMemories(ctx, collide, 10)
+	if err != nil {
+		t.Fatalf("GetOldMemories: %v", err)
+	}
+	if len(results) != 1 || results[0].Memory.Content != "Memory 1" {
+		t.Fatalf("boundary cutoff after migration: got %d results %v, want exactly [Memory 1]",
+			len(results), results)
+	}
+	if !results[0].Memory.CreatedAt.Equal(base) {
+		t.Errorf("migrated row parsed back as %v, want %v", results[0].Memory.CreatedAt, base)
+	}
+
+	// ORDER BY created_at ASC now agrees with time semantics.
+	ordRows, err := db.QueryContext(ctx,
+		`SELECT id FROM episodic_memories ORDER BY created_at ASC`)
+	if err != nil {
+		t.Fatalf("order by query: %v", err)
+	}
+	defer ordRows.Close()
+	var order []string
+	for ordRows.Next() {
+		var id string
+		if err := ordRows.Scan(&id); err != nil {
+			t.Fatalf("scan order row: %v", err)
+		}
+		order = append(order, id)
+	}
+	if len(order) != 2 || order[0] != "legacy-older" || order[1] != "legacy-newer" {
+		t.Errorf("ORDER BY created_at ASC = %v, want [legacy-older legacy-newer]", order)
+	}
+
+	// GetByTimeRange inclusive bounds agree too.
+	rng, err := mem.GetByTimeRange(ctx, base, collide, 10)
+	if err != nil {
+		t.Fatalf("GetByTimeRange: %v", err)
+	}
+	if len(rng) != 2 {
+		t.Errorf("GetByTimeRange inclusive bounds returned %d rows, want 2", len(rng))
+	}
+
+	// --- (d) migration idempotent: rerun the SQL and the whole open path ---
+	var pendingBefore int
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM episodic_memories WHERE %s`,
+		migrate.LegacyTimestampWhere("created_at"))).Scan(&pendingBefore); err != nil {
+		t.Fatalf("pending probe: %v", err)
+	}
+	if pendingBefore != 0 {
+		t.Errorf("%d rows still match the legacy-shape predicate after migration", pendingBefore)
+	}
+	changed, err := migrate.BackfillFixedWidthTimestamps(ctx, db.DB, "episodic_memories", "created_at", "last_accessed_at")
+	if err != nil {
+		t.Fatalf("second padding pass: %v", err)
+	}
+	if changed != 0 {
+		t.Errorf("second padding pass rewrote %d rows, want 0 (idempotence)", changed)
+	}
+	// Full store lifecycle re-open (fresh Initialize against the migrated
+	// db) must also be a no-op on representations.
+	if err := mem.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	mem2 := mustNewEpisodicMemory(t, EpisodicConfig{DataDir: dir})
+	if err := mem2.Initialize(ctx); err != nil {
+		t.Fatalf("re-Initialize: %v", err)
+	}
+	defer mem2.Close()
+	for id, want := range map[string]string{
+		"legacy-older": IsoTime(base),
+		"legacy-newer": IsoTime(collide),
+	} {
+		var got string
+		if err := mem2.store.GetDB().QueryRowContext(ctx,
+			`SELECT created_at FROM episodic_memories WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatalf("re-read %s: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("after re-open %s created_at = %q, want unchanged %q", id, got, want)
+		}
+	}
+}
+
+// TestFreshStoreWritesFixedWidthTimestamps pins that the WRITER itself
+// (not just the migration) emits fixed width for fresh rows, so the
+// migration never has to run against same-binary data.
+func TestFreshStoreWritesFixedWidthTimestamps(t *testing.T) {
+	ctx := context.Background()
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
+		DataDir: filepath.Join(t.TempDir(), "episodic"),
+	})
+	if err := mem.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	defer mem.Close()
+
+	id, err := mem.Store(ctx, "fresh row", "conversation", nil)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	var created, accessed string
+	if err := mem.store.GetDB().QueryRowContext(ctx,
+		`SELECT created_at, last_accessed_at FROM episodic_memories WHERE id = ?`, id).
+		Scan(&created, &accessed); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	for label, v := range map[string]string{"created_at": created, "last_accessed_at": accessed} {
+		if len(v) != isoTimeLen {
+			t.Errorf("fresh %s = %q (len %d), want fixed-width %d", label, v, len(v), isoTimeLen)
+		}
+	}
+
+	// Registry target: episodic carries the padding step (version 7).
+	reg, rerr := mem.store.migrationRegistry()
+	if rerr != nil {
+		t.Fatalf("migrationRegistry: %v", rerr)
+	}
+	if reg.Target() < 7 {
+		t.Errorf("episodic registry target = %d, want >= 7 (padding step present)", reg.Target())
+	}
+}
+
+// TestIsoTimeWidthMatchesMigrate pins the writer width against the shared
+// SQL-side constant the padding migration uses: the Go writer and the SQL
+// shape predicate can never silently diverge (a layout edit that changes
+// the width would otherwise disable padding for new legacy rows).
+func TestIsoTimeWidthMatchesMigrate(t *testing.T) {
+	if got := isoTimeLen; got != migrate.FixedWidthTimeLen {
+		t.Errorf("isoTimeLen = %d, migrate.FixedWidthTimeLen = %d — writer and "+
+			"padding predicate layouts diverged (#196)", got, migrate.FixedWidthTimeLen)
+	}
+	if isoTimeLayout != "2006-01-02T15:04:05.000000000Z07:00" {
+		t.Errorf("isoTimeLayout changed: %q — update migrate/timepad.go shape offsets in lockstep", isoTimeLayout)
 	}
 }

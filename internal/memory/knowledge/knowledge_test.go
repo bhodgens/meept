@@ -2,10 +2,14 @@ package knowledge
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/migrate"
 )
 
 // newTestStore opens a fresh store on a temp dir with a small page cap.
@@ -350,5 +354,84 @@ func TestCloseIdempotent(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// TestLegacyIngestedAtPadding pins the #196 migration on knowledge_pages:
+// rows written in the legacy variable-width RFC3339Nano shape are padded to
+// the fixed 30-char shape at store open (representation-only: exact instant
+// preserved), the eviction ORDER BY agrees with time semantics afterwards,
+// and re-running the padding is a no-op.
+func TestLegacyIngestedAtPadding(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "knowledge.db")
+	seed, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open seed db: %v", err)
+	}
+	if _, err := seed.Exec(`CREATE TABLE knowledge_pages (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    body         TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT '',
+    ingested_at  TEXT NOT NULL,
+    content_hash TEXT NOT NULL DEFAULT '',
+    UNIQUE(title, source))`); err != nil {
+		t.Fatalf("create seed table: %v", err)
+	}
+	// RCA collision pair: .183300 trims to '.1833Z' (sorts ABOVE .183388).
+	older := time.Date(2026, 11, 28, 1, 8, 12, 183300000, time.UTC)
+	newer := older.Add(88 * time.Microsecond)
+	if _, err := seed.Exec(`INSERT INTO knowledge_pages (id, title, body, source, ingested_at)
+		VALUES ('p-older','Older','b','s',?), ('p-newer','Newer','b','s',?)`,
+		older.UTC().Format(time.RFC3339Nano), newer.UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed: %v", err)
+	}
+
+	s, err := New(dir, 0, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Close()
+
+	for id, tc := range map[string]struct {
+		want    string
+		instant time.Time
+	}{
+		"p-older": {"2026-11-28T01:08:12.183300000Z", older},
+		"p-newer": {"2026-11-28T01:08:12.183388000Z", newer},
+	} {
+		var got string
+		if err := s.db.QueryRowContext(ctx, `SELECT ingested_at FROM knowledge_pages WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s ingested_at = %q, want %q", id, got, tc.want)
+		}
+		back, perr := time.Parse(time.RFC3339Nano, got)
+		if perr != nil || !back.Equal(tc.instant) {
+			t.Errorf("%s parse-back = %v (err %v), want exact instant %v", id, back, perr, tc.instant)
+		}
+	}
+	// Eviction order (ORDER BY ingested_at DESC) now matches time order.
+	var firstID string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM knowledge_pages ORDER BY ingested_at DESC LIMIT 1`).Scan(&firstID); err != nil {
+		t.Fatalf("order probe: %v", err)
+	}
+	if firstID != "p-newer" {
+		t.Errorf("ORDER BY ingested_at DESC first = %q, want p-newer", firstID)
+	}
+	// Idempotent: a second pass rewrites nothing.
+	n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.db.DB, "knowledge_pages", "ingested_at")
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("second padding pass rewrote %d values, want 0", n)
 	}
 }

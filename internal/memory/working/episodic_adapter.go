@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/caimlas/meept/internal/memory"
 )
@@ -46,7 +45,7 @@ func (a *EpisodicSinkAdapter) AppendTurns(ctx context.Context, turns []Turn) err
 			"turn_id":    t.ID,
 			"session_id": t.SessionID,
 			"role":       t.Role,
-			"turn_at":    t.At.UTC().Format(time.RFC3339Nano),
+			"turn_at":    memory.IsoTime(t.At),
 		}
 		if _, err := a.store.Store(ctx, t.Content, turnCategory, meta); err != nil {
 			errs = append(errs, fmt.Sprintf("turn %s: %v", t.ID, err))

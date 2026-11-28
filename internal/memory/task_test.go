@@ -127,10 +127,12 @@ func TestTaskMemoryGetRecent(t *testing.T) {
 	defer mem.Close()
 
 	// Store memories. GetRecent returns newest-first (ORDER BY rowid DESC
-	// after the honesty audit: created_at TEXT with RFC3339Nano trims
-	// trailing zeros, so ".9354Z" string-sorted AFTER ".935455Z" and
-	// recency order was wrong for sub-microsecond inserts). Insert order
-	// is authoritative, so Task A/B/C must come back C, B, A.
+	// after the honesty audit: before #196 created_at used raw
+	// RFC3339Nano, whose trailing-zero trimming made ".9354Z" sort
+	// string-wise AFTER ".935455Z" — recency order was wrong for
+	// sub-microsecond inserts. Writers now emit the fixed-width IsoTime
+	// shape. Insert order is authoritative, so Task A/B/C must come back
+	// C, B, A.
 	_, _ = mem.Store(ctx, "Task A", "general", nil)
 	_, _ = mem.Store(ctx, "Task B", "code", nil)
 	_, _ = mem.Store(ctx, "Task C", "code", nil)
@@ -292,8 +294,9 @@ func TestTaskMemoryTimestamps(t *testing.T) {
 		t.Error("Expected nil oldest for empty store")
 	}
 
-	// created_at is RFC3339Nano; back-to-back Stores can share a coarse
-	// wall reading, so oldest==newest is legal — only oldest>newest is a bug.
+	// created_at is fixed-width IsoTime (#196); back-to-back Stores can
+	// still share a coarse wall reading, so oldest==newest is legal —
+	// only oldest>newest is a bug.
 	_, _ = mem.Store(ctx, "First", "general", nil)
 	_, _ = mem.Store(ctx, "Second", "general", nil)
 

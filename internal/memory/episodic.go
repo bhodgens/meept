@@ -94,12 +94,13 @@ func NewEpisodicMemory(cfg EpisodicConfig) (*EpisodicMemory, error) {
 
 	// Create the shared FTS store with episodic-specific config
 	storeCfg := FTSConfig{
-		TableName:     "episodic_memories",
-		FTS5Table:     "episodic_fts",
-		CategoryField: "category",
-		DataDir:       cfg.DataDir,
-		Schema:        []string{createEpisodicTableSQL, createEpisodicFTSSQL},
-		Triggers:      []string{triggerEpisodicInsert, triggerEpisodicDelete, triggerEpisodicUpdate},
+		TableName:        "episodic_memories",
+		FTS5Table:        "episodic_fts",
+		CategoryField:    "category",
+		DataDir:          cfg.DataDir,
+		Schema:           []string{createEpisodicTableSQL, createEpisodicFTSSQL},
+		Triggers:         []string{triggerEpisodicInsert, triggerEpisodicDelete, triggerEpisodicUpdate},
+		TimestampColumns: []string{"created_at", "last_accessed_at"},
 	}
 
 	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
@@ -136,7 +137,7 @@ func (e *EpisodicMemory) Store(ctx context.Context, content, category string, me
 	}
 
 	id := generateUUID()
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	nowISO := IsoTime(time.Now())
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
 	// Extract versioning fields from metadata to populate SQL columns
@@ -297,7 +298,7 @@ func (e *EpisodicMemory) updateLastAccessedByIDs(ctx context.Context, ids []stri
 	if len(ids) == 0 {
 		return nil
 	}
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	nowISO := IsoTime(time.Now())
 	return e.updateLastAccessedByIDsImpl(ctx, nowISO, ids)
 }
 
@@ -397,7 +398,7 @@ func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Tim
 		WHERE created_at >= ? AND created_at <= ?
 		ORDER BY rowid DESC
 		LIMIT ?
-	`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), limit)
+	`, IsoTime(start), IsoTime(end), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get by time range: %w", err)
 	}
@@ -414,7 +415,7 @@ func (e *EpisodicMemory) GetOldMemories(ctx context.Context, olderThan time.Time
 		WHERE created_at < ?
 		ORDER BY created_at ASC
 		LIMIT ?
-	`, olderThan.UTC().Format(time.RFC3339Nano), limit)
+	`, IsoTime(olderThan), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get old memories: %w", err)
 	}

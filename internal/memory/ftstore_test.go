@@ -65,7 +65,11 @@ func mustNewTestFTSStore(t *testing.T, tmpDir string) *SQLiteFTSStore {
 func insertTestItem(t *testing.T, store *SQLiteFTSStore, id, content, category string) {
 	t.Helper()
 	ctx := context.Background()
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	// #196: fixed-width shape; the legacy RFC3339Nano trimming made
+	// MIN/MAX(created_at) disagree with time order on trailing-zero
+	// collisions (this helper bypasses the store's registry padding
+	// because the scratch table declares no TimestampColumns).
+	nowISO := IsoTime(time.Now())
 	err := store.Store(ctx,
 		`INSERT INTO test_items (id, content, category, metadata_json, created_at)
 		 VALUES (?, ?, ?, '{}', ?)`,
@@ -657,7 +661,7 @@ func TestSQLiteFTSStore_ScanResults_Metadata(t *testing.T) {
 	metaJSON := `{"user":"test","count":42}`
 	db := store.GetDB()
 
-	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	nowISO := IsoTime(time.Now())
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO test_items (id, content, category, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,

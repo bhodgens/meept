@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/migrate"
 	"github.com/caimlas/meept/pkg/models"
 
 	_ "modernc.org/sqlite"
@@ -206,6 +207,24 @@ func (s *DualStore) initLocalSchema(ctx context.Context) error {
 		return fmt.Errorf("exec local schema: %w", err)
 	}
 
+	// #196: pad legacy variable-width timestamps (RFC3339Nano trailing-zero
+	// trimming broke lexical ORDER BY/WHERE on created_at/updated_at/
+	// last_activity) to the fixed 30-char IsoTime shape. Idempotent: the
+	// WHERE clause only matches short legacy shapes, so re-running is a
+	// no-op. Best-effort like the search_text backfill — a failed pad
+	// must not brick the store open (fresh-write ordering is already
+	// correct after the writer fix).
+	if n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.localDB, "memories", "created_at", "updated_at"); err != nil {
+		s.logger.Warn("legacy timestamp padding failed (local memories)", "error", err)
+	} else if n > 0 {
+		s.logger.Info("legacy timestamps padded (local memories)", "rows", n)
+	}
+	if n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.localDB, "sessions", "created_at", "last_activity"); err != nil {
+		s.logger.Warn("legacy timestamp padding failed (local sessions)", "error", err)
+	} else if n > 0 {
+		s.logger.Info("legacy timestamps padded (local sessions)", "rows", n)
+	}
+
 	if err := s.setSyncMetaLocal(ctx, "schema_version", syncMetaVersion); err != nil {
 		return fmt.Errorf("set local schema_version: %w", err)
 	}
@@ -224,6 +243,19 @@ func (s *DualStore) initGossipSchema(ctx context.Context) error {
 
 	if _, err := s.gossipDB.ExecContext(ctx, string(schema)); err != nil { //nolint:mutexio // mutex serializes sqlite connection access during one-time schema init
 		return fmt.Errorf("exec gossip schema: %w", err)
+	}
+
+	// #196: same legacy-timestamp padding on the gossip replica (rows
+	// replicated from pre-fix peers carry the trimmed shapes).
+	if n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.gossipDB, "memories", "created_at", "updated_at"); err != nil {
+		s.logger.Warn("legacy timestamp padding failed (gossip memories)", "error", err)
+	} else if n > 0 {
+		s.logger.Info("legacy timestamps padded (gossip memories)", "rows", n)
+	}
+	if n, err := migrate.BackfillFixedWidthTimestamps(ctx, s.gossipDB, "sessions", "created_at", "last_activity"); err != nil {
+		s.logger.Warn("legacy timestamp padding failed (gossip sessions)", "error", err)
+	} else if n > 0 {
+		s.logger.Info("legacy timestamps padded (gossip sessions)", "rows", n)
 	}
 
 	if err := s.setSyncMetaGossip(ctx, "schema_version", syncMetaVersion); err != nil {
@@ -353,11 +385,11 @@ func (s *DualStore) StoreRemoteMemory(ctx context.Context, mem *Memory, sourceNo
 // Called with a snapshot of the DB pointer obtained outside the lock.
 func (s *DualStore) storeMemoryLocalDB(ctx context.Context, db *sql.DB, mem *Memory) error {
 	metaJSON := mem.MetadataJSON()
-	createdAt := mem.CreatedAt.UTC().Format(time.RFC3339Nano)
+	createdAt := IsoTime(mem.CreatedAt)
 
 	updatedAt := ""
 	if mem.UpdatedAt != nil {
-		updatedAt = mem.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		updatedAt = IsoTime(*mem.UpdatedAt)
 	}
 
 	s.localWriteMu.Lock()
@@ -384,11 +416,11 @@ func (s *DualStore) storeMemoryLocalDB(ctx context.Context, db *sql.DB, mem *Mem
 // Called with a snapshot of the DB pointer obtained outside the lock.
 func (s *DualStore) storeMemoryGossipDB(ctx context.Context, db *sql.DB, mem *Memory, sourceNode string) error {
 	metaJSON := mem.MetadataJSON()
-	createdAt := mem.CreatedAt.UTC().Format(time.RFC3339Nano)
+	createdAt := IsoTime(mem.CreatedAt)
 
 	updatedAt := ""
 	if mem.UpdatedAt != nil {
-		updatedAt = mem.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		updatedAt = IsoTime(*mem.UpdatedAt)
 	}
 
 	s.gossipWriteMu.Lock()
@@ -800,8 +832,8 @@ func (s *DualStore) storeSessionLocalDB(ctx context.Context, db *sql.DB, sess *S
 		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json)
 		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?)`,
 		sess.ID, sess.Name, sess.ConversationID,
-		sess.CreatedAt.UTC().Format(time.RFC3339Nano),
-		sess.LastActivity.UTC().Format(time.RFC3339Nano),
+		IsoTime(sess.CreatedAt),
+		IsoTime(sess.LastActivity),
 		sess.Description,
 		sess.ProjectID, sess.ProjectPath,
 		boolToInt(sess.NoFence),
@@ -818,8 +850,8 @@ func (s *DualStore) storeSessionGossipDB(ctx context.Context, db *sql.DB, sess *
 		 (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, metadata_json, source_node)
 		 VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, NULL, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Name, sess.ConversationID,
-		sess.CreatedAt.UTC().Format(time.RFC3339Nano),
-		sess.LastActivity.UTC().Format(time.RFC3339Nano),
+		IsoTime(sess.CreatedAt),
+		IsoTime(sess.LastActivity),
 		sess.Description,
 		sess.ProjectID, sess.ProjectPath,
 		boolToInt(sess.NoFence),

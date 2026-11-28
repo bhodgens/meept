@@ -141,7 +141,7 @@ func (v *voteStore) Insert(rec VoteRecord) error {
 	defer v.mu.Unlock()
 	_, err := v.db.Exec( //nolint:mutexio // db is mutex-guarded at this layer; driver serializes (MaxOpenConns=1)
 		`INSERT INTO memory_votes (memory_id, delta, reason, created_at) VALUES (?, ?, ?, ?)`,
-		rec.MemoryID, rec.Delta, rec.Reason, rec.CreatedAt.UTC().Format(time.RFC3339Nano),
+		rec.MemoryID, rec.Delta, rec.Reason, IsoTime(rec.CreatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert vote: %w", err)

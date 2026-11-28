@@ -288,7 +288,10 @@ func (h *eventGossipHandler) getMemoryMu(memoryID string) *sync.Mutex {
 // not exist or cannot be read (caller treats nil as "no conflict").
 //
 // The gossip memories table stores updated_at (when set) and created_at as
-// RFC3339Nano text and source_node as the originating node ID. The
+// fixed-width RFC3339 UTC text (memory.IsoTime shape since #196; legacy
+// trailing-zero-trimmed rows are padded at store open; the RFC3339Nano
+// parse below accepts both shapes) and source_node as the originating node
+// ID. The
 // synthetic event's Timestamp uses COALESCE(updated_at, created_at) so
 // that re-stored memories with a newer updated_at win LWW conflicts
 // against events with the original creation timestamp.

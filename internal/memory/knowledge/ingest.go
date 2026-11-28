@@ -109,7 +109,7 @@ ON CONFLICT(id) DO UPDATE SET
     source      = excluded.source,
     ingested_at = excluded.ingested_at,
     content_hash = excluded.content_hash
-`, id, page.Title, page.Body, page.Source, ingestedAt.UTC().Format(time.RFC3339Nano), id); err != nil {
+`, id, page.Title, page.Body, page.Source, isoTime(ingestedAt), id); err != nil {
 			return fmt.Errorf("upsert knowledge page: %w", err)
 		}
 

@@ -1770,7 +1770,7 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 
 	db := m.episodic.store.GetDB()
 
-	cutoffISO := cutoffTime.UTC().Format(time.RFC3339Nano)
+	cutoffISO := IsoTime(cutoffTime)
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at, last_accessed_at
 		FROM episodic_memories
