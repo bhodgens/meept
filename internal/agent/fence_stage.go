@@ -25,8 +25,8 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
-	"github.com/caimlas/meept/internal/session"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/security"
 )
 
