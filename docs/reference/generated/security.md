@@ -87,7 +87,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func NewFenceChecker\(cfg FenceConfig, logger \*slog.Logger\) \*FenceChecker](<#NewFenceChecker>)
   - [func \(fc \*FenceChecker\) CheckCommand\(cmd string, workDir string\) error](<#FenceChecker.CheckCommand>)
   - [func \(fc \*FenceChecker\) CheckPath\(path string, op string\) error](<#FenceChecker.CheckPath>)
-  - [func \(fc \*FenceChecker\) CheckPathJailed\(path string, op string, jailRoot string\) error](<#FenceChecker.CheckPathJailed>)
+  - [func \(fc \*FenceChecker\) CheckPathJailed\(path string, op string, jailRoot string, extraRoots ...string\) error](<#FenceChecker.CheckPathJailed>)
   - [func \(fc \*FenceChecker\) IsNoFence\(\) bool](<#FenceChecker.IsNoFence>)
   - [func \(fc \*FenceChecker\) SetNoFence\(enabled bool\)](<#FenceChecker.SetNoFence>)
   - [func \(fc \*FenceChecker\) SetRootPath\(root string\) error](<#FenceChecker.SetRootPath>)
@@ -762,7 +762,7 @@ CheckPath validates a path against the fence. op is "read", "write", or "exec". 
 <a name="FenceChecker.CheckPathJailed"></a>
 ### func \(\*FenceChecker\) CheckPathJailed
 
-	func (fc *FenceChecker) CheckPathJailed(path string, op string, jailRoot string) error
+	func (fc *FenceChecker) CheckPathJailed(path string, op string, jailRoot string, extraRoots ...string) error
 
 CheckPathJailed validates a path against the fence AND against the caller's per\-session jail root \(issue \#138\).
 
@@ -770,12 +770,14 @@ A FenceChecker is one process\-wide object whose RootPath is the rig's static al
 
 jailRoot is the SESSION's working directory, supplied per call by the caller. In production that caller is the re\-homed session FenceStage \(internal/agent/fence\_stage.go, NewSessionFenceStage — issue \#157\), which freezes the stage's own session root as the jail; the builtin tools' per\-call path \(tools.WorkingDirFromContext\) survives only on lanes that still wire a per\-tool checker \(terminal\_service's shell tool\). It is deliberately NOT a field on FenceConfig, because FenceChecker is shared by every tool and session: storing the jail on the config would reintroduce the cross\-session mutation race that per\-session fence instances were introduced to remove \(internal/agent/fence\_stage.go\). The jail is a per\-CALL argument, so the same checker can serve two sessions with different roots concurrently.
 
+extraRoots \(\#137 follow\-on\) is the list of ADDITIONAL WRITABLE jail roots — in production exactly one: the session's scratch directory \(\<MEEPT\_HOME data root\>/scratch/\<sanitized session id\>\). A path inside ANY extra root is allowed with the same short\-circuit as jailRoot \(the roots are unioned into the jail, not ranked\). Empty/whitespace entries are ignored, so a caller with no valid session id passes nothing and gets the exact worktree\-only posture.
+
 Contract:
 
-- jailRoot empty \(or all whitespace\) \-\> identical to CheckPath. This is mandatory: unbound sessions and every non\-session caller must keep the pre\-jail behavior byte for byte.
+- jailRoot empty \(or all whitespace\) and no extra roots \-\> identical to CheckPath. This is mandatory: unbound sessions and every non\-session caller must keep the pre\-jail behavior byte for byte.
 - NoFence / \!Enabled \-\> allowed, jail included \(the per\-session \-\-nofence override outranks the jail, same as the fence itself\).
-- A path inside jailRoot \-\> allowed, even when the ordinary fence would refuse it: the jail is the caller's own worktree, and it is the narrower, more specific contract.
-- A path outside jailRoot \-\> ErrOutsideSessionRoot, even when the static fence \(or AllowRead\) would admit it. The jail only NARROWS.
+- A path inside jailRoot OR any extra root \-\> allowed, even when the ordinary fence would refuse it: the jail is the caller's own worktree \(plus its scratch lane\), and it is the narrower, more specific contract.
+- A path outside jailRoot AND every extra root \-\> ErrOutsideSessionRoot, even when the static fence \(or AllowRead\) would admit it. The jail only NARROWS; the error shape is unchanged.
 
 Symlinks are resolved before the comparison \(the shared path resolution below\), so a link inside the session root pointing outside it is refused.
 
@@ -984,10 +986,12 @@ InterAgentBoundaryPattern is one compiled deny pattern with its class \(D2 taxon
 
 JailedFenceChecker is the capability a fence must expose for the per\-session path jail \(\#138 semantics, re\-homed onto the session FenceStage per issue \#157\): the plain CheckPath/CheckCommand surface plus CheckPathJailed, which applies the jail narrowing. The internal/agent/fence\_stage.go factory mints \*FenceChecker instances that satisfy it; the capability probe keeps plain FenceChecker doubles valid.
 
+The \#137 follow\-on added the variadic extraRoots parameter to CheckPathJailed. Go interface methods match signatures exactly, so the concrete \*FenceChecker keeps this interface satisfied automatically; external doubles that declared the strict 3\-arg shape stop satisfying it \(internal/agent's jailedFenceStage is the only consumer and it calls through the concrete constructor — see fence\_stage.go\).
+
 	type JailedFenceChecker interface {
 	    CheckPath(path string, op string) error
 	    CheckCommand(command string, workDir string) error
-	    CheckPathJailed(path string, op string, jailRoot string) error
+	    CheckPathJailed(path string, op string, jailRoot string, extraRoots ...string) error
 	}
 
 <a name="Message"></a>

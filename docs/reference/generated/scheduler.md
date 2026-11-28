@@ -46,6 +46,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(c JobConfig\) MarshalJSON\(\) \(\[\]byte, error\)](<#JobConfig.MarshalJSON>)
 - [type JobDependencies](<#JobDependencies>)
 - [type JobExecutionResult](<#JobExecutionResult>)
+- [type JobFence](<#JobFence>)
 - [type JobInfo](<#JobInfo>)
 - [type JobResult](<#JobResult>)
 - [type JobType](<#JobType>)
@@ -609,6 +610,21 @@ JobDependencies holds dependencies for extended job types.
 	    // Guard is the two-phase execution-time fence for shell jobs. Nil skips
 	    // guard checks (legacy construction paths and standalone tests).
 	    Guard ShellCommandGuard
+	    // Fence is the execution-time session fence for shell jobs (bughunt
+	    // 2026-11-27 P1). When non-nil, every shell job built from these deps
+	    // judges its command + working directory against the session root at
+	    // fire time — the same posture as the interactive shell tool's fence
+	    // arm — and a job whose targets fall outside the root is DENIED before
+	    // spawn. Nil keeps the legacy byte-identical posture (no fence input,
+	    // no judgment; standalone tests and older embedders).
+	    Fence JobFence
+	    // FenceSessionRoot is the session root the Fence judges against (the
+	    // working directory the creating session was bound to). Required when
+	    // Fence is non-nil; an absolute path. Empty FenceSessionRoot with a
+	    // non-nil Fence means the daemon could not resolve a session root, so
+	    // the fence check is skipped (fail-open logged, matching the daemon's
+	    // nil-checker posture) — never judged against an implicit ".".
+	    FenceSessionRoot string
 	    // ResultSink receives settled shell-job execution results (the result
 	    // lane). Nil skips the lane.
 	    ResultSink ResultSink
@@ -633,6 +649,16 @@ JobExecutionResult is a settled execution attempt in the scheduler's result lane
 	    // readers report how many bytes they actually returned.
 	    TruncatedTo int64  `json:"truncated_to,omitempty"`
 	    Error       string `json:"error,omitempty"`
+	}
+
+<a name="JobFence"></a>
+## type JobFence
+
+JobFence is the execution\-time session fence seam for shell jobs \(bughunt 2026\-11\-27 P1, conservative branch\). It mirrors pkg/security.FenceStage — Go's structural typing connects the production stage \(minted by agent.NewSessionFenceStage\) and any test double without this package importing pkg/security. Nil \(the legacy construction posture\) skips the check entirely: no fence input, no boundary judgment.
+
+	type JobFence interface {
+	    CheckPath(path, op string) error
+	    CheckCommand(command, workDir string) error
 	}
 
 <a name="JobInfo"></a>
@@ -1385,14 +1411,14 @@ ShellJob runs a shell command.
 
 	func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error)
 
-NewShellJob creates a new shell job. The bus\-only form leaves the guard and result sink unset; use NewShellJobWithDeps to wire them.
+NewShellJob creates a new shell job. The bus\-only form leaves the guard, fence and result sink unset; use NewShellJobWithDeps to wire them.
 
 <a name="NewShellJobWithDeps"></a>
 ### func NewShellJobWithDeps
 
 	func NewShellJobWithDeps(cfg JobConfig, deps *JobDependencies) (*ShellJob, error)
 
-NewShellJobWithDeps is NewShellJob with the execution\-time guard and result sink wired from JobDependencies.
+NewShellJobWithDeps is NewShellJob with the execution\-time guard and result sink wired from JobDependencies. deps.Fence \(with deps.FenceSessionRoot\) additionally arms the execution\-time session fence: nil keeps the legacy unfenced posture byte\-identical.
 
 <a name="ShellJob.Execute"></a>
 ### func \(\*ShellJob\) Execute

@@ -65,7 +65,7 @@ Package agent provides the agent loop and related components.
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
 - [func ChatTurnIDFromContext\(ctx context.Context\) string](<#ChatTurnIDFromContext>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
-- [func ComposeSessionFence\(base \*security.PermissionChecker, factory func\(rootPath string, noFence bool\) security.FenceStage, rootPath string, noFence bool, res \*groups.Resolved\) \*security.PermissionChecker](<#ComposeSessionFence>)
+- [func ComposeSessionFence\(base \*security.PermissionChecker, factory func\(rootPath string, noFence bool, sessionID string\) security.FenceStage, rootPath string, noFence bool, sessionID string, res \*groups.Resolved\) \*security.PermissionChecker](<#ComposeSessionFence>)
 - [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
@@ -98,7 +98,7 @@ Package agent provides the agent loop and related components.
 - [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
 - [func MarshalChildDescriptor\(d ChildDescriptor\) \(\[\]byte, error\)](<#MarshalChildDescriptor>)
 - [func MarshalTurnResult\(envelope any\) \[\]byte](<#MarshalTurnResult>)
-- [func NewSessionFenceStage\(rootPath string, allowRead \[\]string, noFence bool, logger \*slog.Logger\) security.FenceStage](<#NewSessionFenceStage>)
+- [func NewSessionFenceStage\(rootPath string, allowRead \[\]string, noFence bool, sessionID string, logger \*slog.Logger\) security.FenceStage](<#NewSessionFenceStage>)
 - [func NewSkillRankingEmbedder\(baseURL, model string, timeout time.Duration\) skills.Embedder](<#NewSkillRankingEmbedder>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
@@ -2998,9 +2998,9 @@ ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff overr
 <a name="ComposeSessionFence"></a>
 ## func ComposeSessionFence
 
-	func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool) security.FenceStage, rootPath string, noFence bool, res *groups.Resolved) *security.PermissionChecker
+	func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool, sessionID string) security.FenceStage, rootPath string, noFence bool, sessionID string, res *groups.Resolved) *security.PermissionChecker
 
-ComposeSessionFence is the exported daemon\-side arm point of composeLoopFence \(issue \#137\): the step\-job lane \(AgentJobProcessor\) arms the per\-task worktree jail on its task\-scoped loops here, because the session\-loop seam \(dispatcher/handler\) never runs for queued step jobs. Same semantics as composeLoopFence: the session jail is the resolved step working dir, the group fs\_roots stay additive, a nil factory or empty root leaves the base checker untouched \(byte\- identical legacy posture\).
+ComposeSessionFence is the exported daemon\-side arm point of composeLoopFence \(issue \#137\): the step\-job lane \(AgentJobProcessor\) arms the per\-task worktree jail on its task\-scoped loops here, because the session\-loop seam \(dispatcher/handler\) never runs for queued step jobs. Same semantics as composeLoopFence: the session jail is the resolved step working dir, the group fs\_roots stay additive, a nil factory or empty root leaves the base checker untouched \(byte\- identical legacy posture\). sessionID \(\#137 follow\-on\) arms the per\-session scratch root inside the jail \(empty/invalid = none\).
 
 <a name="ContextWithToolRegistry"></a>
 ## func ContextWithToolRegistry
@@ -3250,9 +3250,11 @@ MarshalTurnResult serializes the step result envelope the journal stores. Falls 
 <a name="NewSessionFenceStage"></a>
 ## func NewSessionFenceStage
 
-	func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, logger *slog.Logger) security.FenceStage
+	func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, sessionID string, logger *slog.Logger) security.FenceStage
 
 NewSessionFenceStage mints the production per\-session fence stage: a FRESH FenceChecker rooted at the session's working directory, wrapped so the stage itself enforces the \#138 jail narrowing \(issue \#157\). Every session lane \(daemon components.go factory closures, this package's sessionFenceFactory\) must mint through this one function so the jail posture cannot drift between call sites.
+
+sessionID \(\#137 follow\-on\) arms the per\-session scratch allowance: when the stage is minted AND the id sanitizes \(see sessionScratchRoot\), the session's scratch dir under the MEEPT\_HOME data root joins the jail as a second WRITABLE root. An empty or invalid session id arms nothing — the jail stays worktree\-only, byte\-identical to the pre\-follow\-on posture. The scratch dir itself is NOT created here: minting stays pure path arithmetic, and creation is lazy — the file tools MkdirAll parents at 0o755 when a write actually lands \(internal/tools/builtin/ filesystem.go executeWrite\), and the spill precedent creates its dir at 0o700 on first spill.
 
 A nil stage \(no fence\) is returned for an empty rootPath or a \-\-nofence session, matching the legacy posture byte\-for\-byte: unbound sessions and explicit no\-fence overrides outrank the jail, exactly as FenceConfig.NoFence outranks it inside CheckPathJailed.
 
