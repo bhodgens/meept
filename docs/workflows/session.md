@@ -31,6 +31,40 @@ Multi-client sessions need a unified store supporting conversation trees (branch
 - FTS backfill: existing rows are batched into the FTS table (500 rows per batch) on migration.
 - MemoryStore (test/ephemeral): semantic methods return `ErrSemanticUnavailable`; keyword search uses substring matching.
 
+## Per-session scratch directory (#137 follow-on)
+
+What it is: a throwaway directory per session where a jailed session's file
+tools may write, read, and delete test artifacts and other temporary output
+that must never enter the session's repo worktree or any commit. The session
+fence jail (`agent.NewSessionFenceStage`, docs/workflows/agent-groups.md)
+admits it as a SECOND WRITABLE root alongside the worktree.
+
+Where it lives: `<MEEPT_HOME data root>/scratch/<sanitized session id>` —
+the same `$MEEPT_HOME` (else `~/.meept`) resolution the spill tree uses
+(`internal/llm/spill.go`), keyed on the session's PRIMARY id (not the
+conversation id).
+
+Per-session isolation: the jail arms exactly the ONE lane named by this
+session's own id. A path inside another session's scratch dir stays denied
+with the ordinary jail error (`ErrOutsideSessionRoot`), so the scratch
+allowance never widens the fence across sessions. Sanitization mirrors the
+spill allow-set `[a-zA-Z0-9-_]` and REFUSES (no scratch root armed) any id
+carrying a slash, dot-dot, or a rune outside that set — including the empty
+id. A refusal leaves the jail worktree-only, byte-identical to the
+pre-follow-on posture; `--nofence` and unbound (empty-rootPath) sessions
+mint no fence stage at all.
+
+Lifetime: the directory is created LAZILY — the mint is pure path
+arithmetic and touches no filesystem; the file tools create parent
+directories (0755) when a write actually lands in the lane, the same way
+they do inside the worktree. Nothing writes the scratch dir until the
+session's tools do.
+
+Follow-up (explicitly OUT OF SCOPE here): cleanup on session delete.
+Deleting a session does NOT currently remove its `<home>/scratch/<id>`
+directory; a future sweep should reap it the way tool spills are swept
+(`SweepToolSpills`).
+
 ## Archive
 
 Sessions can be soft-archived without deleting the underlying messages, branches, or embeddings. Archived sessions stay queryable (FTS5 keyword and vec0 semantic search continue to return hits from archived sessions), but are visually de-emphasized in client UIs.

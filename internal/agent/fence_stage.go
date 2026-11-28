@@ -23,7 +23,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
+	"github.com/caimlas/meept/internal/session"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -34,7 +36,11 @@ import (
 // factory shape (the daemon closes over its config: FenceEnabled,
 // AllowRead, logger). A nil factory on the handler/dispatcher means
 // fencing is disabled daemon-wide and no fence stage is injected.
-type sessionFenceFactory func(rootPath string, noFence bool) security.FenceStage
+//
+// sessionID (#137 follow-on) is the session's primary id, threaded from
+// the lane's resolved session record — NOT captured from a global — so the
+// mint can arm the per-session scratch root (see NewSessionFenceStage).
+type sessionFenceFactory func(rootPath string, noFence bool, sessionID string) security.FenceStage
 
 // newSessionFenceFactory adapts the daemon's shared-fence CONSTRUCTION
 // policy (template config) into a factory that mints an independent
@@ -44,7 +50,7 @@ type sessionFenceFactory func(rootPath string, noFence bool) security.FenceStage
 // silently get a permissive fence; the factory then yields a nil stage,
 // i.e. no fence, matching the legacy unrooted posture).
 func newSessionFenceFactory(logger *slog.Logger) sessionFenceFactory {
-	return func(rootPath string, noFence bool) security.FenceStage {
+	return func(rootPath string, noFence bool, sessionID string) security.FenceStage {
 		// Issue #157 re-home: the minting lives in NewSessionFenceStage
 		// (the single production construction point the daemon closures
 		// also call), so the #138 per-session jail semantics engage on
@@ -52,7 +58,7 @@ func newSessionFenceFactory(logger *slog.Logger) sessionFenceFactory {
 		// fenceChecker field. The AllowRead list below is the
 		// pre-jail template posture kept for parity; under the jail an
 		// out-of-session read is refused even when AllowRead admits it.
-		return NewSessionFenceStage(rootPath, []string{"/usr", "/bin", "/sbin", "/etc"}, noFence, logger)
+		return NewSessionFenceStage(rootPath, []string{"/usr", "/bin", "/sbin", "/etc"}, noFence, sessionID, logger)
 	}
 }
 
@@ -71,21 +77,81 @@ func newSessionFenceFactory(logger *slog.Logger) sessionFenceFactory {
 //     short-circuiting the fence's own allowlist;
 //   - a path outside it is refused even when AllowRead would admit it.
 //
+// The #137 follow-on added scratchRoot: the session's throwaway directory
+// under the MEEPT_HOME data root (<home>/scratch/<sanitized session id>).
+// When non-empty it rides to CheckPathJailed as an ADDITIONAL WRITABLE jail
+// root — agents running tests get artifacts that never enter the repo or a
+// commit; anything outside BOTH roots keeps the existing jail error shape.
+//
 // Symlink resolution happens inside CheckPathJailed on both sides, so a
 // link inside the session root that lands outside it is refused.
 // CheckCommand keeps the plain checker posture (the command surface is
 // the rig-wide fence contract, unchanged by #157).
 type jailedFenceStage struct {
-	fc       intsecurity.JailedFenceChecker
-	jailRoot string
+	fc          intsecurity.JailedFenceChecker
+	jailRoot    string
+	scratchRoot string
 }
 
 func (s jailedFenceStage) CheckPath(path, op string) error {
-	return s.fc.CheckPathJailed(path, op, s.jailRoot)
+	if s.scratchRoot == "" {
+		return s.fc.CheckPathJailed(path, op, s.jailRoot)
+	}
+	return s.fc.CheckPathJailed(path, op, s.jailRoot, s.scratchRoot)
 }
 
 func (s jailedFenceStage) CheckCommand(command, workDir string) error {
 	return s.fc.CheckCommand(command, workDir)
+}
+
+// sessionScratchAllowSet is the rune set allowed in the session-id path
+// component of the scratch directory. It mirrors internal/llm's
+// spillSessionIDAllowSet exactly (the spill.go precedent is the contract:
+// [a-zA-Z0-9-_]). Unlike sanitizeSpillSessionID — which REPLACES odd runes
+// so a spill always lands somewhere — the jail REFUSES anything odd: an id
+// carrying a slash, a dot-dot sequence, or a rune outside the allow set
+// could steer the scratch root outside <home>/scratch, and the security-
+// critical property here is the per-session boundary, not universal
+// admission. Empty (or whitespace-only) ids are refused the same way: no
+// scratch root is armed and the jail stays worktree-only.
+const sessionScratchAllowSet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+
+// sessionScratchRoot derives the per-session scratch directory
+// <dataRoot>/scratch/<sessionID> from MEEPT_HOME (the same data root the
+// spill service uses, internal/llm/spill.go), or "" when no scratch root
+// may be armed: empty/whitespace session id, or any id whose rune set
+// isn't the spill allow set (slash, dot-dot, and every other odd rune are
+// refused outright — see sessionScratchAllowSet).
+func sessionScratchRoot(sessionID string) string {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return ""
+	}
+	for _, r := range sid {
+		if !strings.ContainsRune(sessionScratchAllowSet, r) {
+			return ""
+		}
+	}
+	return filepath.Join(meeptScratchDataRoot(), sid)
+}
+
+// meeptScratchDataRoot resolves the MEEPT_HOME data root (env override,
+// else $HOME/.meept — the same resolution as internal/llm's spill root;
+// internal/agent imports internal/config, so it calls the single
+// resolution point directly) and returns <home>/scratch.
+func meeptScratchDataRoot() string {
+	return filepath.Join(config.MeeptHome(), "scratch")
+}
+
+// sessionIDForFence extracts the session's PRIMARY id for the fence mint
+// (nil-safe: no session row => no scratch root). The primary id — not the
+// conversation id — is the spill-keyed identity, so the jail's scratch dir
+// and the spill tree name the same lane per session.
+func sessionIDForFence(sess *session.Session) string {
+	if sess == nil {
+		return ""
+	}
+	return sess.ID
 }
 
 // NewSessionFenceStage mints the production per-session fence stage: a
@@ -95,11 +161,22 @@ func (s jailedFenceStage) CheckCommand(command, workDir string) error {
 // sessionFenceFactory) must mint through this one function so the jail
 // posture cannot drift between call sites.
 //
+// sessionID (#137 follow-on) arms the per-session scratch allowance: when
+// the stage is minted AND the id sanitizes (see sessionScratchRoot), the
+// session's scratch dir under the MEEPT_HOME data root joins the jail as a
+// second WRITABLE root. An empty or invalid session id arms nothing — the
+// jail stays worktree-only, byte-identical to the pre-follow-on posture.
+// The scratch dir itself is NOT created here: minting stays pure path
+// arithmetic, and creation is lazy — the file tools MkdirAll parents at
+// 0o755 when a write actually lands (internal/tools/builtin/
+// filesystem.go executeWrite), and the spill precedent creates its dir at
+// 0o700 on first spill.
+//
 // A nil stage (no fence) is returned for an empty rootPath or a
 // --nofence session, matching the legacy posture byte-for-byte: unbound
 // sessions and explicit no-fence overrides outrank the jail, exactly as
 // FenceConfig.NoFence outranks it inside CheckPathJailed.
-func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, logger *slog.Logger) security.FenceStage {
+func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, sessionID string, logger *slog.Logger) security.FenceStage {
 	rootPath = strings.TrimSpace(rootPath)
 	if rootPath == "" || noFence {
 		return nil
@@ -109,7 +186,7 @@ func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, log
 		RootPath:  rootPath,
 		AllowRead: allowRead,
 	}, logger)
-	return security.NewFenceStageAdapter(jailedFenceStage{fc: fc, jailRoot: rootPath})
+	return security.NewFenceStageAdapter(jailedFenceStage{fc: fc, jailRoot: rootPath, scratchRoot: sessionScratchRoot(sessionID)})
 }
 
 // injectSessionFenceStage clones base and installs the given session fence
@@ -125,11 +202,11 @@ func injectSessionFenceStage(base *security.PermissionChecker, stage security.Fe
 
 // factoryMint asks the factory for the session fence stage, nil-safe on
 // every disabled posture (no factory, --nofence, empty root).
-func factoryMint(factory sessionFenceFactory, rootPath string, noFence bool) security.FenceStage {
+func factoryMint(factory sessionFenceFactory, rootPath string, noFence bool, sessionID string) security.FenceStage {
 	if factory == nil || noFence || rootPath == "" {
 		return nil
 	}
-	return factory(rootPath, noFence)
+	return factory(rootPath, noFence, sessionID)
 }
 
 // composeLoopFence is the single arm point for BOTH fences on a
@@ -142,13 +219,17 @@ func factoryMint(factory sessionFenceFactory, rootPath string, noFence bool) sec
 // session root AND every listed fs_root; anything outside both is denied
 // at the path boundary. Without group roots the call is byte-identical to
 // injectSessionFence (Managed=false / nil record contribute nothing).
-func composeLoopFence(base *security.PermissionChecker, factory sessionFenceFactory, rootPath string, noFence bool, res *groups.Resolved) *security.PermissionChecker {
+//
+// sessionID (#137 follow-on) threads the session's primary id to the mint
+// so the per-session scratch root joins the jail; empty/invalid ids arm
+// nothing (worktree-only posture).
+func composeLoopFence(base *security.PermissionChecker, factory sessionFenceFactory, rootPath string, noFence bool, sessionID string, res *groups.Resolved) *security.PermissionChecker {
 	if base == nil {
 		return nil
 	}
 	var sessionStage security.FenceStage
 	if !noFence && rootPath != "" {
-		sessionStage = factoryMint(factory, rootPath, noFence)
+		sessionStage = factoryMint(factory, rootPath, noFence, sessionID)
 	}
 	groupStage := groupFenceStageFor(res, rootPath)
 	if groupStage == nil {
@@ -167,9 +248,10 @@ func composeLoopFence(base *security.PermissionChecker, factory sessionFenceFact
 // jobs. Same semantics as composeLoopFence: the session jail is the
 // resolved step working dir, the group fs_roots stay additive, a nil
 // factory or empty root leaves the base checker untouched (byte-
-// identical legacy posture).
-func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool) security.FenceStage, rootPath string, noFence bool, res *groups.Resolved) *security.PermissionChecker {
-	return composeLoopFence(base, factory, rootPath, noFence, res)
+// identical legacy posture). sessionID (#137 follow-on) arms the
+// per-session scratch root inside the jail (empty/invalid = none).
+func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool, sessionID string) security.FenceStage, rootPath string, noFence bool, sessionID string, res *groups.Resolved) *security.PermissionChecker {
+	return composeLoopFence(base, factory, rootPath, noFence, sessionID, res)
 }
 
 // GroupFenceStage is a FenceStage that checks a path/command against EVERY

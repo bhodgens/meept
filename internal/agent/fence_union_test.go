@@ -39,7 +39,7 @@ func TestComposeLoopFence_GroupRootsArmAlongsideSessionFence(t *testing.T) {
 	factory := newSessionFenceFactory(testLoggerForFence())
 	base := security.NewPermissionChecker(security.Config{})
 
-	composed := composeLoopFence(base, factory, sessionRoot, false, managedRes(groupRoot))
+	composed := composeLoopFence(base, factory, sessionRoot, false, "", managedRes(groupRoot))
 	if composed == nil {
 		t.Fatal("composeLoopFence returned nil with a factory + managed roots")
 	}
@@ -76,7 +76,7 @@ func TestComposeLoopFence_GroupFenceArmsWithoutSessionFence(t *testing.T) {
 	outside := t.TempDir()
 
 	base := security.NewPermissionChecker(security.Config{})
-	composed := composeLoopFence(base, nil, sessionRoot, false, managedRes(groupRoot))
+	composed := composeLoopFence(base, nil, sessionRoot, false, "", managedRes(groupRoot))
 	if composed == nil || composed == base {
 		t.Fatal("managed roots must arm a fence clone even with no session factory")
 	}
@@ -91,12 +91,12 @@ func TestComposeLoopFence_GroupFenceArmsWithoutSessionFence(t *testing.T) {
 	}
 	// Pre-fix byte-identical check: nil factory + NO managed record must
 	// keep returning the base pointer untouched (no fence appears).
-	plain := composeLoopFence(base, nil, sessionRoot, false, nil)
+	plain := composeLoopFence(base, nil, sessionRoot, false, "", nil)
 	if plain != base {
 		t.Fatal("unmanaged + no factory must pass base through byte-identically")
 	}
 	unmanaged := &groups.Resolved{Managed: false, FSRoots: []string{groupRoot}}
-	if got := composeLoopFence(base, nil, sessionRoot, false, unmanaged); got != base {
+	if got := composeLoopFence(base, nil, sessionRoot, false, "", unmanaged); got != base {
 		t.Fatal("Managed=false records must contribute no group fence")
 	}
 }
@@ -111,8 +111,8 @@ func TestComposeLoopFence_SessionFenceOnlyByteIdentical(t *testing.T) {
 	factory := newSessionFenceFactory(testLoggerForFence())
 	base := security.NewPermissionChecker(security.Config{})
 
-	viaCompose := composeLoopFence(base, factory, sessionRoot, false, &groups.Resolved{Managed: true})
-	viaLegacy := composeLoopFence(base, factory, sessionRoot, false, nil)
+	viaCompose := composeLoopFence(base, factory, sessionRoot, false, "", &groups.Resolved{Managed: true})
+	viaLegacy := composeLoopFence(base, factory, sessionRoot, false, "", nil)
 	for _, path := range []string{filepath.Join(sessionRoot, "f"), filepath.Join(other, "f")} {
 		e1 := viaCompose.CheckPathFence(path, "write")
 		e2 := viaLegacy.CheckPathFence(path, "write")
@@ -133,7 +133,7 @@ func TestComposeLoopFence_NoFenceSessionKeepsGroupFence(t *testing.T) {
 	factory := newSessionFenceFactory(testLoggerForFence())
 	base := security.NewPermissionChecker(security.Config{})
 
-	composed := composeLoopFence(base, factory, sessionRoot, true, managedRes(groupRoot))
+	composed := composeLoopFence(base, factory, sessionRoot, true, "", managedRes(groupRoot))
 	if composed == nil || composed == base {
 		t.Fatal("--nofence session must still arm the group fence")
 	}

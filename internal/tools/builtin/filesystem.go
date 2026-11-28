@@ -62,8 +62,16 @@ func (t *ReadFileTool) SetFenceChecker(fc FenceChecker) {
 // in shell.go) so the existing fence doubles stay valid; production fences
 // always satisfy it, and a fence that does not simply keeps the pre-jail
 // CheckPath behavior.
+//
+// The #137 follow-on widened the concrete CheckPathJailed signature to
+// (path, op, jailRoot, extraRoots ...string) for the per-session scratch
+// root. This probe carries the same variadic shape: Go interface methods
+// match signatures exactly, and *FenceChecker is the only production
+// implementation (the builtin fence doubles implement CheckPath only, so
+// the probe fails for them exactly as before and they keep the pre-jail
+// CheckPath behavior).
 type jailedFenceChecker interface {
-	CheckPathJailed(path string, op string, jailRoot string) error
+	CheckPathJailed(path string, op string, jailRoot string, extraRoots ...string) error
 }
 
 // checkPathJailed is the shared session-jail fence call for the filesystem

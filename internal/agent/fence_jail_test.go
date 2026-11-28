@@ -39,7 +39,7 @@ import (
 func TestSessionFenceStage_JailShortCircuitsEmptyAllowlist(t *testing.T) {
 	jail := t.TempDir()
 	factory := newSessionFenceFactory(testLoggerForFence())
-	stage := factory(jail, false)
+	stage := factory(jail, false, "")
 	if stage == nil {
 		t.Fatal("factory must mint a stage for a non-empty root")
 	}
@@ -96,7 +96,7 @@ func TestSessionFenceStage_JailDeniesWhereCentralRulesWouldAllow(t *testing.T) {
 	// pre-re-home control — plain fc.CheckPath on the same config —
 	// admits this read; that swap is what turns this pin red during the
 	// non-vacuity check, see the file header.)
-	stage := NewSessionFenceStage(jail, []string{foreignResolved}, false, testLoggerForFence())
+	stage := NewSessionFenceStage(jail, []string{foreignResolved}, false, "", testLoggerForFence())
 	if stage == nil {
 		t.Fatal("NewSessionFenceStage returned nil for a valid root")
 	}
@@ -120,7 +120,7 @@ func TestSessionFenceStage_JailDeniesWhereCentralRulesWouldAllow(t *testing.T) {
 	// verdict must be a fence denial (RuleSource "fence") even though the
 	// glob stage passes.
 	base := security.NewPermissionChecker(security.Config{AllowedPaths: []string{"/"}})
-	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), jail, false, nil)
+	loop := composeLoopFence(base, newSessionFenceFactory(testLoggerForFence()), jail, false, "", nil)
 	if loop == nil || loop == base {
 		t.Fatal("composeLoopFence must install a per-session fenced clone")
 	}
@@ -146,13 +146,13 @@ func TestSessionFenceStage_JailDeniesWhereCentralRulesWouldAllow(t *testing.T) {
 func TestSessionFenceStage_NilPosturesUnchanged(t *testing.T) {
 	jail := t.TempDir()
 	factory := newSessionFenceFactory(testLoggerForFence())
-	if got := factory(jail, true); got != nil {
+	if got := factory(jail, true, ""); got != nil {
 		t.Fatalf("--nofence must yield no stage (jail outranks nothing): %T", got)
 	}
-	if got := factory("", false); got != nil {
+	if got := factory("", false, ""); got != nil {
 		t.Fatalf("empty root must yield no stage: %T", got)
 	}
-	if got := NewSessionFenceStage("  ", nil, false, testLoggerForFence()); got != nil {
+	if got := NewSessionFenceStage("  ", nil, false, "", testLoggerForFence()); got != nil {
 		t.Fatalf("blank root must yield no stage: %T", got)
 	}
 }
@@ -172,8 +172,126 @@ func TestSessionFenceStage_SymlinkEscapeRefused(t *testing.T) {
 	if err := os.Symlink(foreign, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	stage := NewSessionFenceStage(jail, nil, false, testLoggerForFence())
+	stage := NewSessionFenceStage(jail, nil, false, "", testLoggerForFence())
 	if err := stage.CheckPath(filepath.Join(link, "secret.txt"), "read"); err == nil {
 		t.Fatal("symlink escape admitted — jail comparison is not symlink-resolved")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// #137 follow-on — per-session SCRATCH root pins.
+//
+// The session fence, when armed with a valid session id, admits the
+// session's scratch dir (<MEEPT_HOME>/scratch/<session id>) as a second
+// WRITABLE jail root; everything outside BOTH roots keeps the existing
+// jail error shape. These pins run against the real production
+// constructor with MEEPT_HOME pinned to a temp dir, so the scratch root
+// resolution (config.MeeptHome + "scratch" + sanitized id) is exercised
+// end-to-end, not mocked.
+//
+// NON-VACUITY (disable-restore probes, removed after verification):
+//   - pin (a)/(b): drop `s.scratchRoot` from the jailedFenceStage.CheckPath
+//     call in fence_stage.go -> the scratch WRITE turns red (and (b) stays
+//     green vacuously, which is exactly why (b) needs its own probe);
+//   - pin (b) specifically: make sessionScratchRoot key on a constant
+//     (or ignore the id) -> session B's stage admits session A's scratch
+//     dir, turning (b) red while (a) stays green — the per-session
+//     boundary is what the probe tests, not the scratch union alone;
+//   - pin (c): have sessionScratchRoot fall back to the raw/unsanitized
+//     id (or "" -> a shared default dir) -> the traversal/empty-id cases
+//     admit a scratch root, turning (c) red.
+
+// TestSessionFenceStage_ScratchRootPins is the combined (a)+(b)+(c) pin:
+// (a) a scratch write is ALLOWED while an out-of-jail write stays DENIED
+// with the existing jail error shape; (b) a DIFFERENT session's scratch
+// dir is DENIED — the per-session boundary bites; (c) an invalid session
+// id (slash / dot-dot runes) arms no scratch root at all — worktree-only
+// posture.
+func TestSessionFenceStage_ScratchRootPins(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+	jail := t.TempDir()
+
+	const sidA = "session-a1b2c3d4"
+	const sidB = "session-e5f6g7h8"
+	scratchA := filepath.Join(home, "scratch", sidA)
+	scratchB := filepath.Join(home, "scratch", sidB)
+	outside := t.TempDir()
+
+	stage := NewSessionFenceStage(jail, nil, false, sidA, testLoggerForFence())
+	if stage == nil {
+		t.Fatal("mint must succeed for a valid root")
+	}
+
+	// (a) scratch write/read/delete under the session's OWN scratch dir is
+	// permitted; the dir need not pre-exist (lazy creation — the file
+	// tools MkdirAll parents when a write actually lands).
+	for _, op := range []string{"write", "read", "delete"} {
+		if err := stage.CheckPath(filepath.Join(scratchA, "artifact.bin"), op); err != nil {
+			t.Fatalf("scratch %s denied for the owning session (a): %v", op, err)
+		}
+	}
+	// (a, second half) an out-of-jail write is STILL denied, existing jail
+	// error shape intact (ErrOutsideSessionRoot sentinel).
+	foreignWrite := filepath.Join(outside, "leak.txt")
+	err := stage.CheckPath(foreignWrite, "write")
+	if err == nil {
+		t.Fatal("out-of-jail AND out-of-scratch write allowed — scratch union widened the jail past its two roots")
+	}
+	if !errors.Is(err, intsecurity.ErrOutsideSessionRoot) {
+		t.Fatalf("out-of-jail denial must keep ErrOutsideSessionRoot shape, got: %v", err)
+	}
+
+	// (b) THE security-critical pin: a DIFFERENT session's scratch dir is
+	// denied. session B's stage must not admit A's lane and vice versa.
+	stageB := NewSessionFenceStage(jail, nil, false, sidB, testLoggerForFence())
+	if err := stageB.CheckPath(filepath.Join(scratchA, "other.bin"), "write"); err == nil {
+		t.Fatal("session B's jail admitted session A's scratch dir — the per-session boundary does not bite")
+	} else if !errors.Is(err, intsecurity.ErrOutsideSessionRoot) {
+		t.Fatalf("cross-session scratch denial must keep the jail error shape, got: %v", err)
+	}
+	// Symmetry: A's stage refuses B's lane, and B's own lane is allowed.
+	if err := stage.CheckPath(filepath.Join(scratchB, "mine.bin"), "write"); err == nil {
+		t.Fatal("session A's jail admitted session B's scratch dir")
+	}
+	if err := stageB.CheckPath(filepath.Join(scratchB, "mine.bin"), "write"); err != nil {
+		t.Fatalf("session B's own scratch lane denied: %v", err)
+	}
+
+	// (c) invalid / empty session ids arm NO scratch root: the jail stays
+	// worktree-only, so the scratch lane (even the real directory below)
+	// is DENIED while in-jail writes keep working.
+	for _, bad := range []string{"", "   ", "sess/../../escape", "sess/../x", "weird id!", "sess.dot", "x/../../scratch/session-a1b2c3d4"} {
+		s := NewSessionFenceStage(jail, nil, false, bad, testLoggerForFence())
+		if s == nil {
+			t.Fatalf("stage must still mint for a valid rootPath with session id %q", bad)
+		}
+		if err := s.CheckPath(filepath.Join(scratchA, "x.bin"), "write"); err == nil {
+			t.Fatalf("invalid/empty session id %q armed a scratch root — traversal-unsafe or absent id must stay worktree-only", bad)
+		}
+		if err := s.CheckPath(filepath.Join(jail, "f.go"), "write"); err != nil {
+			t.Fatalf("worktree-only posture broke in-jail write for id %q: %v", bad, err)
+		}
+	}
+}
+
+// TestSessionFenceStage_NofenceUnchangedByScratch pins (d): the scratch
+// follow-on must not disturb the --nofence posture — a no-fence session
+// still mints NO stage at all, byte-identical to the legacy passthrough,
+// whatever the session id says.
+func TestSessionFenceStage_NofenceUnchangedByScratch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+	jail := t.TempDir()
+	factory := newSessionFenceFactory(testLoggerForFence())
+	if got := factory(jail, true, "session-a1b2c3d4"); got != nil {
+		t.Fatalf("--nofence with a valid session id must still yield no stage: %T", got)
+	}
+	if got := NewSessionFenceStage(jail, nil, true, "session-a1b2c3d4", testLoggerForFence()); got != nil {
+		t.Fatalf("--nofence mint must yield no stage regardless of scratch arming: %T", got)
+	}
+	// Empty-rootPath stays nil too (requirement 3, other half).
+	if got := NewSessionFenceStage("", nil, false, "session-a1b2c3d4", testLoggerForFence()); got != nil {
+		t.Fatalf("empty rootPath must yield no stage even with a valid id: %T", got)
 	}
 }

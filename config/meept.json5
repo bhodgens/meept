@@ -629,8 +629,10 @@
     // Issue #137: arms the #138 per-session path jail (session FenceStage,
     // minted via agent.NewSessionFenceStage on the chat, dispatch, and
     // step-job lanes). A bound session's file tools are restricted to the
-    // session's worktree/project dir; --nofence and unbound sessions keep
-    // the legacy posture. Set false to opt out daemon-wide.
+    // session's worktree/project dir plus the session's scratch dir
+    // ($MEEPT_HOME/scratch/<session id>, #137 follow-on); --nofence and
+    // unbound sessions keep the legacy posture. Set false to opt out
+    // daemon-wide.
     "fence_enabled": true,
     "allowed_paths": ["~/*"],
     "blocked_paths": ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],

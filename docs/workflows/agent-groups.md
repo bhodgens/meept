@@ -170,6 +170,25 @@ before the child starts. Empty and `unrestricted` are unchanged.
   outside it the read/write is refused even when `fence_allow_read` (or
   the wildcard path globs) would admit it. The jail engages centrally —
   the retired per-tool `SetFenceChecker` wiring is not restored.
+- **Per-session scratch root (#137 follow-on).** When the session fence
+  jails a session with a valid primary id, the mint also arms that
+  session's SCRATCH directory as a second WRITABLE jail root:
+  `<MEEPT_HOME data root>/scratch/<sanitized session id>` — the same
+  data-root resolution and the same `[a-zA-Z0-9-_]` allow-set the spill
+  tree uses (`internal/llm/spill.go`). Agents running tests therefore
+  get a throwaway lane for artifacts that never enter the repo or any
+  commit, while a path outside BOTH the worktree and the session's own
+  scratch dir keeps the existing jail denial shape
+  (`ErrOutsideSessionRoot`). The boundary is per-session: a DIFFERENT
+  session's scratch dir stays denied. An empty or invalid session id
+  (anything carrying slash, dot-dot, or a rune outside the allow set)
+  arms NO scratch root — the jail stays worktree-only, byte-identical
+  to the pre-follow-on posture — and `--nofence` / empty-rootPath
+  sessions still mint no stage at all. The scratch dir itself is created
+  lazily by the file tools when a write lands (minting is pure path
+  arithmetic; see `docs/workflows/session.md`). Mechanism: one
+  FenceChecker, jail roots unioned per call via
+  `CheckPathJailed(path, op, jailRoot, extraRoots...)`.
 - **Groups file backstop** (`groups_backstop`): when
   `default_managed=true`, non-admin agents are denied file/shell access to
   the membership surfaces: the users store, `<home>/agents/**`, and the

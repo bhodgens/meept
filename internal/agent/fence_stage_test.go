@@ -60,7 +60,7 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 
-	factory := func(rootPath string, noFence bool) security.FenceStage {
+	factory := func(rootPath string, noFence bool, sessionID string) security.FenceStage {
 		if noFence || rootPath == "" {
 			return nil
 		}
@@ -74,8 +74,8 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 	}
 
 	base := security.NewPermissionChecker(security.Config{AllowedPaths: []string{"/"}})
-	pcA := composeLoopFence(base, factory, rootA, false, nil)
-	pcB := composeLoopFence(base, factory, rootB, false, nil)
+	pcA := composeLoopFence(base, factory, rootA, false, "", nil)
+	pcB := composeLoopFence(base, factory, rootB, false, "", nil)
 
 	if pcA == base || pcB == base {
 		t.Fatalf("injectSessionFence must return per-session clones, not the shared base checker")
@@ -149,17 +149,17 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 // unchanged — the legacy path, no fence stage.
 func TestSessionFence_NilFactoryAndNoFencePassthrough(t *testing.T) {
 	base := security.NewPermissionChecker(security.Config{})
-	if got := composeLoopFence(base, nil, t.TempDir(), false, nil); got != base {
+	if got := composeLoopFence(base, nil, t.TempDir(), false, "", nil); got != base {
 		t.Fatalf("nil factory must pass the base checker through unchanged")
 	}
-	factory := func(string, bool) security.FenceStage { return &fakeSessionFence{id: "x", root: "/"} }
-	if got := composeLoopFence(base, factory, t.TempDir(), true, nil); got != base {
+	factory := func(string, bool, string) security.FenceStage { return &fakeSessionFence{id: "x", root: "/"} }
+	if got := composeLoopFence(base, factory, t.TempDir(), true, "", nil); got != base {
 		t.Fatalf("noFence session must pass the base checker through unchanged (no fence)")
 	}
-	if got := composeLoopFence(base, factory, "", false, nil); got != base {
+	if got := composeLoopFence(base, factory, "", false, "", nil); got != base {
 		t.Fatalf("empty root must pass the base checker through unchanged (no fence)")
 	}
-	if composeLoopFence(nil, factory, t.TempDir(), false, nil) != nil {
+	if composeLoopFence(nil, factory, t.TempDir(), false, "", nil) != nil {
 		t.Fatalf("nil base must yield nil (typed-nil guard)")
 	}
 }
@@ -172,8 +172,8 @@ func TestSessionFence_FactoryMintsDistinctInstances(t *testing.T) {
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 
-	fa := factory(rootA, false)
-	fb := factory(rootB, false)
+	fa := factory(rootA, false, "")
+	fb := factory(rootB, false, "")
 	if fa == nil || fb == nil {
 		t.Fatalf("factory returned nil stages for valid roots")
 	}
@@ -192,10 +192,10 @@ func TestSessionFence_FactoryMintsDistinctInstances(t *testing.T) {
 	}
 
 	// --nofence sessions get no fence at all.
-	if got := factory(rootA, true); got != nil {
+	if got := factory(rootA, true, ""); got != nil {
 		t.Fatalf("noFence must yield a nil fence stage, got %T", got)
 	}
-	if got := factory("", false); got != nil {
+	if got := factory("", false, ""); got != nil {
 		t.Fatalf("empty root must yield a nil fence stage, got %T", got)
 	}
 }
