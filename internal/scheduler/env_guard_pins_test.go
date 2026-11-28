@@ -28,7 +28,7 @@ func TestShellJobGuardSourceIncludesEnv(t *testing.T) {
 		},
 	}
 	g := &recordingGuard{}
-	if _, err := newShellJob(cfg, nil, g, nil); err != nil {
+	if _, err := newShellJob(cfg, nil, g, nil, "", nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
 	// Execute runs the guard phases before the (expected) spawn failure;

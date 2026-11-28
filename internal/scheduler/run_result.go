@@ -132,6 +132,17 @@ type ShellCommandGuard interface {
 	CheckCommandInDir(ctx context.Context, command, workDir string) error
 }
 
+// JobFence is the execution-time session fence seam for shell jobs (bughunt
+// 2026-11-27 P1, conservative branch). It mirrors pkg/security.FenceStage —
+// Go's structural typing connects the production stage (minted by
+// agent.NewSessionFenceStage) and any test double without this package
+// importing pkg/security. Nil (the legacy construction posture) skips the
+// check entirely: no fence input, no boundary judgment.
+type JobFence interface {
+	CheckPath(path, op string) error
+	CheckCommand(command, workDir string) error
+}
+
 // ResultSink is the minimal result-lane surface ShellJob needs. *Store cannot
 // implement it directly because its existing Get(id) (JobConfig, bool) method
 // collides with Get(handle) (JobExecutionResult, bool); resultStore adapts it

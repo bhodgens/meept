@@ -73,7 +73,7 @@ func TestShellJobGuardSourceDerivedNotTrusted(t *testing.T) {
 		},
 	}
 	guard := &recordingGuard{block: true}
-	job, err := newShellJob(cfg, nil, guard, nil)
+	job, err := newShellJob(cfg, nil, guard, nil, "", nil)
 	if err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestShellJobGuardSourceDerivedForEveryShape(t *testing.T) {
 		},
 	}
 	g1 := &recordingGuard{block: true}
-	if _, err := newShellJob(matchCfg, nil, g1, nil); err != nil {
+	if _, err := newShellJob(matchCfg, nil, g1, nil, "", nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
 	if err := runGuardPhase1(t, matchCfg, g1); err == nil {
@@ -140,7 +140,7 @@ func TestShellJobGuardSourceDerivedForEveryShape(t *testing.T) {
 		},
 	}
 	g2 := &recordingGuard{}
-	if _, err := newShellJob(legacyCfg, nil, g2, nil); err != nil {
+	if _, err := newShellJob(legacyCfg, nil, g2, nil, "", nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
 	// The fixture binary does not exist, so Execute fails at spawn AFTER
@@ -163,7 +163,7 @@ func TestShellJobGuardSourceDerivedForEveryShape(t *testing.T) {
 		},
 	}
 	g3 := &recordingGuard{}
-	if _, err := newShellJob(poisonedCfg, nil, g3, nil); err != nil {
+	if _, err := newShellJob(poisonedCfg, nil, g3, nil, "", nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
 	// Spawn fails for the fixture binary AFTER the guard phases ran.
@@ -186,7 +186,7 @@ func TestShellJobGuardSourceDerivedForEveryShape(t *testing.T) {
 // fixture binaries) — only the classification sources matter here.
 func runGuardPhase1(t *testing.T, cfg JobConfig, g *recordingGuard) error {
 	t.Helper()
-	job, err := newShellJob(cfg, nil, g, nil)
+	job, err := newShellJob(cfg, nil, g, nil, "", nil)
 	if err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func TestShellJobErrWaitDelayLiveCtxReportsSuccess(t *testing.T) {
 		},
 	}
 	sink := &captureSink{}
-	job, err := newShellJob(cfg, nil, nil, sink)
+	job, err := newShellJob(cfg, nil, nil, nil, "", sink)
 	if err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestShellJobErrWaitDelayAfterCancelReportsCancelled(t *testing.T) {
 		},
 	}
 	sink := &captureSink{}
-	job, err := newShellJob(cfg, nil, nil, sink)
+	job, err := newShellJob(cfg, nil, nil, nil, "", sink)
 	if err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}

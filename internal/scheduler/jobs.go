@@ -449,27 +449,38 @@ type ShellJob struct {
 	// paths, e.g. standalone tests) skips guard checks; the daemon wires it
 	// through JobDependencies so every scheduler-fired shell job is fenced.
 	guard ShellCommandGuard
+	// jobFence is the execution-time session fence (bughunt 2026-11-27 P1).
+	// Nil (legacy posture) skips the fence judgment entirely. When set,
+	// Execute judges the effective command source + working directory
+	// against fenceRoot BEFORE the child is spawned — the same posture the
+	// interactive shell tool's fence arm applies — so a scheduled command
+	// whose target paths fall outside the session root is denied at fire
+	// time, closing the TOCTOU window between creation-time and execution.
+	jobFence  JobFence
+	fenceRoot string
 	// resultSink receives the settled result. Nil skips the result lane;
 	// the daemon wires it through JobDependencies.
 	resultSink ResultSink
 }
 
-// NewShellJob creates a new shell job. The bus-only form leaves the guard and
-// result sink unset; use NewShellJobWithDeps to wire them.
+// NewShellJob creates a new shell job. The bus-only form leaves the guard,
+// fence and result sink unset; use NewShellJobWithDeps to wire them.
 func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
-	return newShellJob(cfg, msgBus, nil, nil)
+	return newShellJob(cfg, msgBus, nil, nil, "", nil)
 }
 
 // NewShellJobWithDeps is NewShellJob with the execution-time guard and result
-// sink wired from JobDependencies.
+// sink wired from JobDependencies. deps.Fence (with deps.FenceSessionRoot)
+// additionally arms the execution-time session fence: nil keeps the legacy
+// unfenced posture byte-identical.
 func NewShellJobWithDeps(cfg JobConfig, deps *JobDependencies) (*ShellJob, error) {
 	if deps == nil {
-		return newShellJob(cfg, nil, nil, nil)
+		return newShellJob(cfg, nil, nil, nil, "", nil)
 	}
-	return newShellJob(cfg, deps.Bus, deps.Guard, deps.ResultSink)
+	return newShellJob(cfg, deps.Bus, deps.Guard, deps.Fence, deps.FenceSessionRoot, deps.ResultSink)
 }
 
-func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard, sink ResultSink) (*ShellJob, error) {
+func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard, fence JobFence, fenceRoot string, sink ResultSink) (*ShellJob, error) {
 	if cfg.ShellConfig == nil {
 		return nil, fmt.Errorf("shell job requires shell_config")
 	}
@@ -520,6 +531,8 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 		capture:      cfg.ShellConfig.CaptureOut,
 		bus:          msgBus,
 		guard:        guard,
+		jobFence:     fence,
+		fenceRoot:    fenceRoot,
 		resultSink:   sink,
 	}, nil
 }
@@ -560,6 +573,20 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	if j.guard != nil {
 		if err := j.guard.CheckCommandInDir(execCtx, guardSource, j.workDir); err != nil {
 			return j.settleGuardFailure(ctx, err)
+		}
+	}
+
+	// Phase 3 (session-fence judgment, bughunt 2026-11-27 P1): when the
+	// daemon armed a session fence on this job, judge the SAME effective
+	// surface the interactive shell tool's fence arm judges — the guard
+	// source and the resolved working directory — against the session root.
+	// A scheduled command whose target paths fall outside the session root
+	// is denied HERE, at fire time, before the child is spawned. A nil
+	// fence (legacy construction, standalone tests, deps without a fence)
+	// skips this block entirely: byte-identical legacy behavior.
+	if j.jobFence != nil {
+		if err := j.jobFence.CheckCommand(guardSource, j.effectiveWorkDir()); err != nil {
+			return j.settleGuardFailure(ctx, fmt.Errorf("session fence: %w", err))
 		}
 	}
 
@@ -719,6 +746,18 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	// Terminal error is still returned to executeJob so the existing
 	// UpdateLastRun / completion-event / logging paths behave as before.
 	return runErr
+}
+
+// effectiveWorkDir resolves the working directory the child will actually
+// run in: the job's ShellConfig.WorkDir when set, otherwise the session
+// root the daemon armed on this job (the session fence's implicit-cwd
+// posture: an unset work_dir means the session's bound directory, never an
+// unjudged daemon CWD). Only the armed-fence path consults the root.
+func (j *ShellJob) effectiveWorkDir() string {
+	if strings.TrimSpace(j.workDir) != "" {
+		return j.workDir
+	}
+	return j.fenceRoot
 }
 
 // settleGuardFailure writes a settled failed result for a guard refusal
@@ -955,6 +994,21 @@ type JobDependencies struct {
 	// Guard is the two-phase execution-time fence for shell jobs. Nil skips
 	// guard checks (legacy construction paths and standalone tests).
 	Guard ShellCommandGuard
+	// Fence is the execution-time session fence for shell jobs (bughunt
+	// 2026-11-27 P1). When non-nil, every shell job built from these deps
+	// judges its command + working directory against the session root at
+	// fire time — the same posture as the interactive shell tool's fence
+	// arm — and a job whose targets fall outside the root is DENIED before
+	// spawn. Nil keeps the legacy byte-identical posture (no fence input,
+	// no judgment; standalone tests and older embedders).
+	Fence JobFence
+	// FenceSessionRoot is the session root the Fence judges against (the
+	// working directory the creating session was bound to). Required when
+	// Fence is non-nil; an absolute path. Empty FenceSessionRoot with a
+	// non-nil Fence means the daemon could not resolve a session root, so
+	// the fence check is skipped (fail-open logged, matching the daemon's
+	// nil-checker posture) — never judged against an implicit ".".
+	FenceSessionRoot string
 	// ResultSink receives settled shell-job execution results (the result
 	// lane). Nil skips the lane.
 	ResultSink ResultSink
