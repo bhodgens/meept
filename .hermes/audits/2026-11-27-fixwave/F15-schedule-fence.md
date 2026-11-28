@@ -1,9 +1,7 @@
 # F15 — Execution-time fence for scheduled shell jobs (bughunt P1, conservative branch)
 
-Status: **scheduler-side seam LANDED; daemon wiring HANDED OFF** (exceeds the
-one-additive-line rule; exact wiring below).
-
-Commit: `8dbe83a32` (scheduler-side fence seam + pins, owned paths only).
+Status: **scheduler-side seam LANDED at `f29e9233c`; daemon wiring HANDED
+OFF** (exceeds the one-additive-line rule; exact wiring below).
 Creation-time half (out of lane): `06fb3b657`.
 
 ## What landed (scheduler-side seam, nil = legacy)
@@ -42,7 +40,7 @@ Files (all owned by this lane):
 - `env_guard_pins_test.go` / `spill_guard_pins_test.go` — mechanical
   newShellJob-signature updates only (`""` = fence unset).
 
-Gates at commit: `go test -count=1 ./internal/scheduler/` ok (22s),
+Gates at commit: `go test -count=1 ./internal/scheduler/` ok (23s),
 `go test -count=1 ./internal/memory/` ok (shared-tree gate), `go build ./...`
 ok, gofmt clean, go vet clean (scheduler package).
 
@@ -59,59 +57,52 @@ probe cases green).
 
 The seam arms only when `JobDependencies.Fence` is non-nil. Today
 `internal/daemon/components.go` ~:5349-5380 builds `jobDeps` ONCE at boot
-with `Guard` only — and crucially **the session root is not a boot-time
-constant**: it is known per-job at creation time (the creating session's
-bound working directory) and jobs persist/reload across restarts, so the
-guard's `c.FenceChecker` path (nil since the shared checker retired,
+with `Guard` only — and the session root is NOT a boot-time constant: it is
+known per-job at creation time (the creating session's bound working
+directory) and jobs persist/reload across restarts, so the guard's
+`c.FenceChecker` path (nil since the shared checker retired,
 components.go:1268-1274) cannot be reused by copying one line.
 
-Exact wiring needed (daemon lane + `internal/scheduler` approval for any
-new accessor; all scheduler-side hooks already exist):
+Exact wiring needed (daemon lane + one scheduler-side follow-up field;
+all scheduler-side hooks already exist):
 
-1. **Creation path (primary).** Where the scheduler tools register jobs —
-   `scheduler.RegisterJob` / `CreateJobWithDeps` callers reached from
-   `internal/tools/builtin/tool_schedule_create.go:221` /
-   `tool_cron_create.go:184` / `tool_job_start.go:154` — the shell job must
-   be built with a per-job fence instead of the shared boot-time
-   `jobDeps.Guard` fence slot. Minimal shape:
+1. **Scheduler-side follow-up (prerequisite, one small additive commit):**
+   add `JobDependencies.FenceFactory func(sessionRoot string) JobFence`
+   (run_result.go / jobs.go), consulted by `NewShellJobWithDeps` when
+   `deps.Fence == nil && deps.FenceFactory != nil && cfg.ShellConfig != nil`,
+   with the root read from a new persisted `ShellJobConfig.SessionRoot`
+   (additive JSON: old rows load unchanged and keep the legacy posture).
+   The factory's non-nil result becomes BOTH the job's fence and its
+   `fenceRoot`. Until this field lands, the daemon lane cannot complete
+   the wiring alone.
+
+2. **Daemon wiring (components.go, alongside the jobDeps build ~:5361):**
 
    ```go
-   // internal/daemon (e.g. components.go, alongside the jobDeps build ~:5361)
    jobDeps.FenceFactory = func(sessionRoot string) scheduler.JobFence {
-       if sessionRoot == "" { return nil } // unresolvable root -> legacy posture, logged
-       fenceAllowRead := []string{"/usr", "/bin", "/sbin", "/etc"} // same as components.go:5227-5234 sites
+       if sessionRoot == "" { return nil } // unresolvable root -> legacy posture, warn-logged
+       fenceAllowRead := []string{"/usr", "/bin", "/sbin", "/etc"} // same as the components.go:5227-5234 sites
        return agent.NewSessionFenceStage(sessionRoot, fenceAllowRead, false, logger)
    }
    ```
 
-   This needs a scheduler-side addition (NOT in this commit — it adds an
-   exported field): `JobDependencies.FenceFactory func(sessionRoot string) JobFence`,
-   consulted by `NewShellJobWithDeps` when `deps.Fence == nil &&
-   deps.FenceFactory != nil && cfg.ShellConfig != nil`, using
-   `cfg.Metadata["session_root"]` (or a new `ShellJobConfig.SessionRoot`
-   persisted field — preferred, additive JSON, old rows load unchanged) as
-   the root, and the factory result BOTH as the fence and the effective
-   `fenceRoot`. Until that scheduler-side field lands, the daemon lane
-   cannot complete the wiring alone.
+   ~10 lines (closure + allow-read constant + logger capture) — far beyond
+   one line, hence the handoff.
 
-2. **Where the root comes from.** The creating tools already resolve the
-   session's working directory (executor injects it at creation time,
-   `06fb3b657`'s details["working_dir"] path); it must be stamped into the
-   job config at `schedule_create`/`cron_create`/`job_start` time — the
-   daemon lane owns `internal/tools/builtin` registration args and the
-   `agent.Executor` injection point is `06fb3b657`'s own code
-   (`internal/agent/executor.go`, ~:536 area).
+3. **Where the root is stamped.** `schedule_create` / `cron_create` /
+   `job_start` must persist the creating session's resolved working
+   directory into `ShellJobConfig.SessionRoot` at creation time. The tools
+   already resolve it (executor injects it at creation, `06fb3b657`'s
+   details["working_dir"] path — that file belongs to the F2 lane; the
+   stamp site is `internal/tools/builtin/tool_schedule_create.go:221`,
+   `tool_cron_create.go:184`, `tool_job_start.go:154`).
 
-3. **Recovery path (must not be forgotten).** Jobs restored from the store
-   on boot go through `scheduler.go`'s load path (recovery_pins_test.go
-   coverage), NOT the tool path. With the persisted `ShellJobConfig.SessionRoot`
-   from (1)/(2), `NewShellJobWithDeps`'s factory consult covers recovered
-   rows automatically — but ONLY if the boot-time `jobDeps` in
-   `components.go` (~:5361-5377) carries the `FenceFactory` closure. That
-   daemon-side block is ~10 lines (closure + allow-read constant + logger
-   capture), far beyond one line.
+4. **Recovery path (automatic with 1+2).** Jobs restored from the store on
+   boot go through `NewShellJobWithDeps` (`CreateJobWithDeps`), so the
+   factory consult covers recovered rows once `SessionRoot` is persisted —
+   no separate wiring needed.
 
-4. **Do NOT** wire `c.FenceChecker` into `jobDeps.Fence` directly: it is
+5. **Do NOT** wire `c.FenceChecker` into `jobDeps.Fence` directly: it is
    nil by design (components.go:1268-1274) and a shared daemon-rooted
    checker would jail every job against the daemon CWD (the exact S-1/H2
    failure mode), not the creating session's root.
@@ -121,10 +112,22 @@ new accessor; all scheduler-side hooks already exist):
 - Boot with `fence_enabled:true`, create a shell job from a session rooted
   at DIR with `command: "cat /etc/hosts"` → job fires → settled result is
   failed with "session fence" in the error, nothing spawned.
-- Same job created from a session rooted at DIR with in-DIR command →
-  executes normally.
-- Legacy rows (no session root persisted, pre-wiring store) → legacy
+- Same shape with an in-DIR command → executes normally.
+- Legacy rows (no `SessionRoot` persisted, pre-wiring store) → legacy
   unfenced posture (P1-4 shape through the real daemon).
+
+## Landing notes (shared-tree incidents, both resolved)
+
+- The first landing `8dbe83a32` was DROPPED from the branch by a sibling
+  lane's `git reset` (reflog HEAD@{1..2}); content recovered from the
+  working tree and re-landed re-gated.
+- The second attempt (`16a62cd9f`, amended `f79dbf3b4`) swept two
+  sibling-owned `internal/employee/*` hunks through a concurrent
+  index-lock race; both were restored to HEAD^ state before the final
+  commit, so the sibling's L16/T-8 lane keeps ownership (their change was
+  left as working-tree modifications for them to commit).
+- Final commit `f29e9233c` contains ONLY the 5 owned scheduler paths;
+  verified via `git show --name-only`.
 
 ## Out of lane / surfaced
 
@@ -136,5 +139,3 @@ new accessor; all scheduler-side hooks already exist):
   `pkg/security/permissions.go`; nothing in this commit touches either.
   No coordination dependency: the seam consumes a `FenceStage`-shaped
   interface, which is what `agent.NewSessionFenceStage` already returns.
-- Two fence-pin test runs during development were flake-free; full
-  scheduler suite (including 20s timing suites) green before commit.
