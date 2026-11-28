@@ -88,3 +88,21 @@ touches internal/agent/review_manager.go only; must NOT touch client.go).
 subagent-model via socrates-litellm: wave 2b children died ~2h in with
 "Connection error" after 3 retries (tasks 185/190/186). Wave 1 children
 finished but landed nothing in their worktrees. Keep briefs SHORT and scoped.
+
+## CAMPAIGN CLOSEOUT (2026-11-27 — ALL 10 LANES LANDED)
+gh186: lane commit 71dec58b (hooks 22/22 green after user manually rm'd
+junk internal/agent/retry_utils.go — CLI approval prompt timed out twice,
+so the rm was user-executed). Merge 3f628d4f7 resolved a content conflict
+in internal/agent/review_manager.go: kept main's L6 producer-lane
+structure (ReviewVerdictSource / PublishReviewVerdictFromProducer /
+reviewEmitterIdentities 5-return) and grafted the bounded-retry blame
+join (resolveBlameModel + reviewedModelResolver seam + blameJoinSleeper).
+Final repo-wide sweep on merged main: go build OK, go vet OK, gofmt clean,
+make test -p 2 => FINAL_TEST_EXIT=0, 162 ok packages, recorder
+"15001 test result(s) (0 fail)". TestDecisionLog_DeniedPathAndWorkdir
+passes on merged main. Note: an earlier sweep (SWEEP2, exit 2) ran mid-
+merge against the conflicted review_manager.go — stale, not a regression.
+Also landed this pass: 437197b6 docs(hermes) tracked the 4 durable
+.hermes/*.md trackers + lane-revert patches (convention: 160 .hermes
+files already tracked; scratch stays opted out via .hermes/worktrees/).
+.hermes/g174/ stale scratch deleted by user. No push performed.
